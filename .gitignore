@@ -1,0 +1,59 @@
+# dot files
+/.vscode/
+.cmsis/
+.pack/
+
+# per-instance eide auto-generated files
+examples/*/.eide/log
+examples/*/.eide/*.usr.ctx.json
+
+# project out
+/build
+/bin
+/obj
+/out
+/output
+
+# instance build output
+examples/*/build/
+examples/*/software/list/
+examples/*/software/output/
+examples/*/software/Objects/
+examples/*/software/Listings/
+examples/*/software/RTE/
+
+# eide template
+*.ept
+*.eide-template
+
+# Keil user config
+*.uvoptx
+*.uvguix.*
+
+# temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.axf
+*.Bak
+*.crf
+*.d
+*.o
+*.htm
+*.hct
+
+# logs
+*.log
+*.txt
+JLinkLog.txt
+
+# IDE files
+.idea/
+*.suo
+*.user
+
+# OS files
+.DS_Store
+Thumbs.db
