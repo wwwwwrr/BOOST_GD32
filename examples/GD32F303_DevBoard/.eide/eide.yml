@@ -10,10 +10,25 @@ virtualFolder:
   folders:
     - name: Application
       files:
+        - path: software/Application/Source/app_boost_monitor.c
+        - path: software/Application/Source/app_key.c
         - path: software/Application/Source/gd32f30x_it.c
         - path: software/Application/Source/main.c
         - path: software/Application/Source/systick.c
-        - path: software/Application/Source/timer1_algorithm.c
+      folders: []
+    - name: L1_Orchestration
+      files:
+        - path: ../../core/src/L1_Orchestration/boost_control.c
+      folders: []
+    - name: L2_Core
+      files:
+        - path: ../../core/src/L2_Core/Business/incremental_pi.c
+      folders: []
+    - name: L3_Hal
+      files:
+        - path: ../../core/src/L3_Hal/adc_measurement.c
+        - path: ../../core/src/L3_Hal/control_timer.c
+        - path: ../../core/src/L3_Hal/duty_control.c
       folders: []
     - name: CMSIS
       files:
@@ -54,12 +69,14 @@ virtualFolder:
       files:
         - path: software/Utilities/LED/LED.c
         - path: software/Utilities/PWM/pwm.c
-        - path: software/Utilities/TIMER1/timer1.c
+        - path: software/Utilities/TIMER4/timer4.c
         - path: software/Utilities/USART/usart.c
-        - path: software/Utilities/TIMER2/timer2.c
+        - path: software/Utilities/USART/usart2.c
         - path: software/Utilities/AS5600/as5600.c
         - path: software/Utilities/I2C/i2c.c
         - path: software/Utilities/ADC/adc.c
+        - path: software/Utilities/KEY/key.c
+        - path: software/Utilities/SHUTOFF/shutoff.c
       folders: []
     - name: ::CMSIS
       files: []
@@ -85,12 +102,17 @@ targets:
         - software/RTE/_GD32F30X_CL
         - software/Utilities/LED
         - software/Utilities/PWM
-        - software/Utilities/TIMER1
+        - software/Utilities/TIMER4
         - software/Utilities/USART
-        - software/Utilities/TIMER2
         - software/Utilities/AS5600
         - software/Utilities/I2C
         - software/Utilities/ADC
+        - software/Utilities/KEY
+        - software/Utilities/SHUTOFF
+        - ../../core/include/LS_Config
+        - ../../core/include/L1_Orchestration
+        - ../../core/include/L2_Core/Business
+        - ../../core/include/L3_Hal
       libList: []
     excludeList: []
     settings:

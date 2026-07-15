@@ -22,20 +22,25 @@
 software/
 ├── Application/               ← 应用层
 │   ├── Include/
-│   │   ├── main.h            ← 主头文件（测试用，正式开发需重建）
+│   │   ├── main.h            ← 主程序依赖入口
+│   │   ├── app_key.h         ← 按键业务绑定接口
+│   │   ├── app_boost_monitor.h ← Boost 串口监视上层接口
 │   │   ├── interrupt_priority.h ← 中断优先级集中定义
 │   │   └── ...
 │   └── Source/
-│       └── main.c            ← 主程序（当前为测试代码，正式开发需重建）
+│       ├── app_key.c         ← SHUTOFF 与 Boost 按键业务编排
+│       ├── app_boost_monitor.c ← 200 ms 状态复制与 USART0 输出编排
+│       └── main.c            ← Boost 控制系统初始化入口
 ├── Utilities/                 ← BSP 外设驱动
 │   ├── ADC/                  ← 三相电流采样、电压检测
 │   ├── PWM/                  ← 三相交错 PWM 输出
-│   ├── TIMER1/               ← 算法定时器
-│   ├── TIMER2/               ← 通用定时器
-│   ├── USART/                ← USART1 串口通信
+│   ├── TIMER4/               ← 10 kHz Boost 控制定时器
+│   ├── USART/                ← USART0 板载 CH340N 串口通信
 │   ├── USART2/               ← 扩展串口
 │   ├── I2C/                  ← I2C 总线驱动
 │   ├── AS5600/               ← 磁编码器驱动
+│   ├── KEY/                  ← 四路 EXTI 按键与非阻塞消抖
+│   ├── SHUTOFF/              ← PB12 SHUTOFF 输出控制
 │   └── LED/                  ← GPIO LED 控制
 ├── Firmware/                  ← 芯片 SDK (GD32F30x 标准外设库)
 ├── RTE/                       ← Keil 运行时环境
@@ -51,9 +56,18 @@ software/
 
 ## 当前状态
 
-- BSP 驱动层已完成并验证（ADC/PWM/Timer/USART/I2C/LED/AS5600）
-- `main.c` 包含临时测试代码，用于验证各外设驱动
-- 框架核心层（LS/L1/L2/L3）尚未填充，详见 `docs/framework-dev-guide.md`
+- PWM 驱动已切换为 TIMER3/TIMER2/TIMER1 三相 120° 交错、六路逻辑互补输出
+- `main.c` 只编排系统及 Application 上层模块的初始化和主循环任务；系统上电保持空闲，通过按键回调提交启动、停止或清故障请求
+- TIMER4 以 10 kHz 运行 Boost 快速控制环，执行命令处理、ADC 换算、过压判断、双环 PI 和最终 PWM 状态输出
+- ADC0 软件触发连续扫描 PA3/PA4/PA5，采用 71.5 周期采样和硬件 8 倍过采样；DMA 半满/全满各发布一组三通道平均 raw，理论更新率约 14.9 kHz
+- ADC1 由 TIMER3 同步启动的 300 kHz TIMER0_CH0 触发，间断轮转采样 PA0/PA1/PA2，每相更新率为 100 kHz
+- L3 `ADCMeasurement_*` 将 ADC0 平均 raw 换算为输出电流、输出电压和输入电压，并将 ADC1 完整三相 raw 换算为带正负方向的相电流
+- 六路波形与长期相位稳定性仍需使用示波器或六通道逻辑分析仪完成硬件验收
+- L1 持有 30 V 电压环和 2 A 电流环 PI 实例，两环占空比取较小值并统一输出到 A/B/C 三相
+- 软启动目标从 12 V 开始，每个 100 us 增加 0.001 V；占空比限制为 0%～70%，每周期最大变化为 0.1%
+- 首版软件保护启用 40 V 输出过压锁存，故障状态立即清零并停止全部 PWM
+- KEY1～KEY4 已配置为低电平有效的 EXTI 输入；KEY1 反转 PB12 SHUTOFF，KEY2/KEY3/KEY4 分别请求启动、停止和清除 Boost 故障
+- Application 层 `AppBoostMonitor_Init/Task` 使用 PA9/PA10 的 USART0 和 115200-8N1，每 200 ms 复制一次 Boost 上下文并打印状态、模式、故障、六项 ADC 实际值和三相占空比
 
 ## 快速开始
 
@@ -66,19 +80,30 @@ software/
 
 | 功能 | 引脚 |
 |------|------|
-| 三相 PWM | PB6/PB7, PB5/PB4, PB3/PA15 |
+| 三相 PWM | PB6/PB7（A 正向/互补）, PB4/PB5（B 正向/互补）, PA15/PB3（C 正向/互补） |
 | 三相电流 ADC | PA0/PA1/PA2 |
-| 输出电压检测 | PA3 |
-| 输出电流检测 | PA4 |
+| 输出电流检测 | PA3 |
+| 输出电压检测 | PA4 |
 | 输入电压检测 | PA5 |
 | USART0 (CH340) | PA9/PA10 |
 | USART2 (扩展) | PB10/PB11 |
-| I2C0 (AS5600) | PB6(SCL)/PB7(SDA) |
+| I2C0 (AS5600) | 旧配置：PB6(SCL)/PB7(SDA)，与 A 相 PWM 冲突，需迁移 |
 | 按键 | PA8/PB15/PB14/PB13 |
+| SHUTOFF 输出 | PB12，初始化为低电平，KEY1 按下时反转 |
 | LED | PC15(R)/PC14(G)/PC13(B) |
+
+PWM 固定为 100 kHz。TIMER3 为主定时器，TIMER2/TIMER1 通过 ITI3 Event 模式同步启动；A/B/C 正向输出相位依次为 0°/120°/240°。占空比接口接受 `float`，按 1200 个周期计数直接截断量化。当前普通定时器方案不支持硬件死区，`PWM_DEAD_TIME_NS` 必须保持为 0。
+
+ADC0 底层通过双快照地址发布 PA3 输出电流、PA4 输出电压、PA5 输入电压的硬件 8 倍平均 raw，不在 BSP 内进行软件平均或物理量换算；ADC1 底层结果包含 PA0/PA1/PA2 的最新完整三相 raw。L3 `ADCMeasurement_*` 校验 ADC0 快照令牌后，使用 3.3 V/4096 量化比例换算实际值：输出电压增益 29.75、输入电压增益 5.29、输出电流增益 20 A/V，相电流按 `(Vadc - 1.1 V) * 8 A/V` 计算并保留负值。
+
+L3 的 `DutyControl_*` 接口负责初始化、启停和设置三相占空比，不向上层暴露 GD32 或 PWM 驱动类型。L2 的 `IncrementalPI_*` 按 `Δu=Kp[e(k)-e(k-1)]+Ki×e(k)` 计算单周期增量，并使用 LS 中的 `BOOST_DUTY_MAX_STEP_PERCENT` 限幅。控制器实例由 L1 持有，L1 负责将增量累加到电压环和电流环候选占空比，再将结果限制到 0%～70% 后交给 L3。
+
+L1 `BoostControl_10kHzHandler()` 由 TIMER4 中断通过 L3 控制定时器回调触发。命令处理优先级为 STOP、CLEAR_FAULT、START；STOP 不清除锁存故障，STOP 和 CLEAR_FAULT 都会复位两个 PI、软启动目标以及全部占空比。真实 PWM 启停与写入只在最终状态执行阶段发生。
+
+调试输出由 Application 层 `AppBoostMonitor_Task()` 调度，并通过 USART0 的 `printf` 重定向发送。`main.c` 不直接复制或格式化 Boost 数据；快速控制中断也不格式化或发送串口数据。Application 层复制上下文时不关闭中断，因此极少数打印行可能包含相邻两个控制周期的数据。
 
 完整管脚定义见 `docs/hardware.md`。
 
 ---
 
-*本实例为框架的 BSP 层参考实现，具体业务代码待需求到来时按 `docs/framework-dev-guide.md` 指引填充。*
+*本实例当前包含三相交错 Boost 的首版 10 kHz 闭环控制编排，硬件验收仍需使用示波器、逻辑分析仪和可控电源完成。*

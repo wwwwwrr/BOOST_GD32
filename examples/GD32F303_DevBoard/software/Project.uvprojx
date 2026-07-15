@@ -10,13 +10,13 @@
       <TargetName>GD32F30X_CL</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
-      <pCCUsed>5060750::V5.06 update 6 (build 750)::ARMCC</pCCUsed>
+      <pCCUsed>5060960::V5.06 update 7 (build 960)::.\ARM_Compiler_5.06u7</pCCUsed>
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
           <Device>GD32F303CC</Device>
           <Vendor>GigaDevice</Vendor>
-          <PackID>GigaDevice.GD32F30x_DFP.2.2.1</PackID>
+          <PackID>GigaDevice.GD32F30x_DFP.2.6.0</PackID>
           <PackURL>https://gd32mcu.com/data/documents/pack/</PackURL>
           <Cpu>IRAM(0x20000000,0x0C000) IROM(0x08000000,0x040000) CPUTYPE("Cortex-M4") FPU2 CLOCK(12000000) ELITTLE</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
@@ -185,10 +185,12 @@
             <uocXRam>0</uocXRam>
             <RvdsVP>2</RvdsVP>
             <RvdsMve>0</RvdsMve>
+            <RvdsCdeCp>0</RvdsCdeCp>
+            <nBranchProt>0</nBranchProt>
             <hadIRAM2>0</hadIRAM2>
             <hadIROM2>0</hadIROM2>
             <StupSel>8</StupSel>
-            <useUlib>0</useUlib>
+            <useUlib>1</useUlib>
             <EndSel>0</EndSel>
             <uLtcg>0</uLtcg>
             <nSecure>0</nSecure>
@@ -338,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_STDPERIPH_DRIVER,GD32F30X_HD</Define>
               <Undefine></Undefine>
-              <IncludePath>.\Firmware\CMSIS;.\Firmware\CMSIS\GD\GD32F30x\Include;.\Firmware\GD32F30x_standard_peripheral\Include;.\Utilities;.\Application\Include;.\Utilities\LED;.\Utilities\PWM;.\Utilities\TIMER1;.\Utilities\TIMER2;.\Utilities\USART;.\Utilities\AS5600;.\Utilities\I2C;.\Utilities\ADC</IncludePath>
+              <IncludePath>.\Firmware\CMSIS;.\Firmware\CMSIS\GD\GD32F30x\Include;.\Firmware\GD32F30x_standard_peripheral\Include;.\Utilities;.\Application\Include;.\Utilities\LED;.\Utilities\PWM;.\Utilities\TIMER4;.\Utilities\USART;.\Utilities\AS5600;.\Utilities\I2C;.\Utilities\ADC;.\Utilities\KEY;.\Utilities\SHUTOFF;..\..\..\core\include\LS_Config;..\..\..\core\include\L1_Orchestration;..\..\..\core\include\L2_Core\Business;..\..\..\core\include\L3_Hal</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -351,7 +353,7 @@
             <NoWarn>0</NoWarn>
             <uSurpInc>0</uSurpInc>
             <useXO>0</useXO>
-            <uClangAs>0</uClangAs>
+            <ClangAsOpt>4</ClangAsOpt>
             <VariousControls>
               <MiscControls></MiscControls>
               <Define></Define>
@@ -388,6 +390,16 @@
               <FilePath>.\Application\Source\main.c</FilePath>
             </File>
             <File>
+              <FileName>app_key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Application\Source\app_key.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_boost_monitor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Application\Source\app_boost_monitor.c</FilePath>
+            </File>
+            <File>
               <FileName>gd32f30x_it.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\Application\Source\gd32f30x_it.c</FilePath>
@@ -397,10 +409,45 @@
               <FileType>1</FileType>
               <FilePath>.\Application\Source\systick.c</FilePath>
             </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>L1_Orchestration</GroupName>
+          <Files>
             <File>
-              <FileName>timer1_algorithm.c</FileName>
+              <FileName>boost_control.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\Application\Source\timer1_algorithm.c</FilePath>
+              <FilePath>..\..\..\core\src\L1_Orchestration\boost_control.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>L2_Core</GroupName>
+          <Files>
+            <File>
+              <FileName>incremental_pi.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\core\src\L2_Core\Business\incremental_pi.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>L3_Hal</GroupName>
+          <Files>
+            <File>
+              <FileName>duty_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\core\src\L3_Hal\duty_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>adc_measurement.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\core\src\L3_Hal\adc_measurement.c</FilePath>
+            </File>
+            <File>
+              <FileName>control_timer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\core\src\L3_Hal\control_timer.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -563,14 +610,9 @@
               <FilePath>.\Utilities\PWM\pwm.c</FilePath>
             </File>
             <File>
-              <FileName>timer1.c</FileName>
+              <FileName>timer4.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\Utilities\TIMER1\timer1.c</FilePath>
-            </File>
-            <File>
-              <FileName>timer2.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\Utilities\TIMER2\timer2.c</FilePath>
+              <FilePath>.\Utilities\TIMER4\timer4.c</FilePath>
             </File>
             <File>
               <FileName>usart.c</FileName>
@@ -597,6 +639,16 @@
               <FileType>1</FileType>
               <FilePath>.\Utilities\ADC\adc.c</FilePath>
             </File>
+            <File>
+              <FileName>key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Utilities\KEY\key.c</FilePath>
+            </File>
+            <File>
+              <FileName>shutoff.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Utilities\SHUTOFF\shutoff.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>
@@ -608,5 +660,14 @@
     <components/>
     <files/>
   </RTE>
+
+  <LayerInfo>
+    <Layers>
+      <Layer>
+        <LayName>Project</LayName>
+        <LayPrjMark>1</LayPrjMark>
+      </Layer>
+    </Layers>
+  </LayerInfo>
 
 </Project>

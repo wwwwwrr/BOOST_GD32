@@ -37,9 +37,9 @@ OF SUCH DAMAGE.
 #include "systick.h"
 #include "LED.h"
 #include "usart.h"
-#include "timer1.h"
-#include "timer2.h"
+#include "timer4.h"
 #include "adc.h"
+#include "key.h"
 
 /*!
     \brief      this function handles NMI exception
@@ -145,42 +145,26 @@ void SysTick_Handler(void)
 }
 
 /*!
-    \brief      TIMER2 interrupt service routine
+    \brief      USART0 interrupt service routine
     \param[in]  none
     \param[out] none
     \retval     none
 */
-void TIMER2_IRQHandler(void)
+void USART0_IRQHandler(void)
 {
-    /* Call TIMER2 interrupt handler from timer2 module */
-    extern void Timer2_IRQHandler_Internal(void);
-    Timer2_IRQHandler_Internal();
+    USART0_IRQHandler_Internal();
 }
 
 /*!
-    \brief      USART1 interrupt service routine
-    \param[in]  none
-    \param[out] none
-    \retval     none
+    \brief      TIMER4 10 kHz Boost 控制中断服务入口
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+    \note       本入口只转发到 TIMER4 模块，禁止添加阻塞操作
 */
-void USART1_IRQHandler(void)
+void TIMER4_IRQHandler(void)
 {
-    /* Call USART1 interrupt handler from USART module */
-    extern void USART1_IRQHandler_Internal(void);
-    USART1_IRQHandler_Internal();
-}
-
-/*!
-    \brief      TIMER1 interrupt service routine
-    \param[in]  none
-    \param[out] none
-    \retval     none
-*/
-void TIMER1_IRQHandler(void)
-{
-    /* Call TIMER1 interrupt handler from simplified timer1 module */
-    extern void Timer1_IRQHandler_Internal(void);
-    Timer1_IRQHandler_Internal();
+    Timer4_IRQHandler_Internal();
 }
 
 /*!
@@ -191,7 +175,38 @@ void TIMER1_IRQHandler(void)
 */
 void DMA0_Channel0_IRQHandler(void)
 {
-    /* Call DMA0 interrupt handler from ADC module */
-    extern void ADC_DMA_IRQHandler_Internal(void);
     ADC_DMA_IRQHandler_Internal();
+}
+
+/*!
+    \brief      ADC0 and ADC1 interrupt service routine
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+void ADC0_1_IRQHandler(void)
+{
+    ADC1_IRQHandler_Internal();
+}
+
+/*!
+    \brief      EXTI5 to EXTI9 interrupt service routine
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+void EXTI5_9_IRQHandler(void)
+{
+    KEY_EXTI5_9_IRQHandler_Internal();
+}
+
+/*!
+    \brief      EXTI10 to EXTI15 interrupt service routine
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+void EXTI10_15_IRQHandler(void)
+{
+    KEY_EXTI10_15_IRQHandler_Internal();
 }

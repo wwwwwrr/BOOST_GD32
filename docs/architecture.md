@@ -86,6 +86,8 @@ LS ───────→ 可被 L1/L2/L3/L4 任意一层 #include，纯编译
 
 当前项目包含一个实例工程 `examples/GD32F303_DevBoard/`，详情见该实例目录下的文档。
 
+当前核心库包含 L1 `BoostControl_*`、L2 `IncrementalPI_*` 以及 L3 `ADCMeasurement_*`、`DutyControl_*`、`ControlTimer_*`。L1 持有电压环和电流环实例、累加 L2 返回的单周期增量并编排 10 kHz 控制顺序；L2 只根据当前误差和历史误差计算已限幅增量；L3 分别抽象 ADC 实际值、三相占空比和控制时基，不向公共头文件暴露芯片厂商 SDK 类型。实例工程 L4 使用 TIMER4 提供 10 kHz 中断，中断入口只清除更新标志并调用已注册的控制回调；Application 层使用 `AppBoostMonitor_*` 连接 L1 状态读取与 L4 USART0 调试输出，避免平台相关打印逻辑进入核心 L1。
+
 ## 架构约束
 
 以下约束是保持依赖清晰、避免耦合混乱的关键规则：

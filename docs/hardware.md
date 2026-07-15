@@ -2,7 +2,7 @@
 
 > ⚠️ **本文档与当前 BSP 驱动代码不匹配**
 >
-> 本文档描述的是**三相交错 Boost 升压电源板**的硬件，而当前实例 `examples/GD32F303_DevBoard` 的 BSP 驱动实际适配的是**另一套硬件**（电机控制板）。PWM/ADC/USART/LED 管脚定义均不一致。
+> 本文档描述的是**三相交错 Boost 升压电源板**的硬件。当前实例 `examples/GD32F303_DevBoard` 的 PWM 与 ADC 驱动已按本文档重写，但 USART/LED 等旧 BSP 模块仍可能适配另一套硬件。
 >
 > **开发时以代码中各模块 `.h` 文件定义的管脚宏为准**，待硬件平台确认后需统一修正本文档或驱动代码。
 > 详细对比见 `framework-dev-guide.md` 第 1.4 节。
@@ -56,16 +56,22 @@
 
 ## 4. PWM接口
 
-PWM由 MCU TIM1\TIM2\TIM3 定时器的CH1\CH2分别输出。
+PWM 由三个普通定时器的 CH0/CH1 输出。TIMER3 为 A 相主定时器，TIMER2 为 B 相从定时器，TIMER1 为 C 相从定时器；频率固定为 100 kHz，相位依次为 0°、120°、240°。
 
   信号    MCU引脚   功能
   ------- --------- ---------
-  PWMA    PB6       A相上管
-  PWMAN   PB7       A相下管
-  PWMB    PB5       B相上管
-  PWMBN   PB4       B相下管
-  PWMC    PB3       C相上管
-  PWMCN   PA15      C相下管
+  PWMA    PB6       A相正向 PWM（TIMER3_CH0）
+  PWMAN   PB7       A相逻辑互补 PWM（TIMER3_CH1）
+  PWMB    PB4       B相正向 PWM（TIMER2_CH0，部分重映射）
+  PWMBN   PB5       B相逻辑互补 PWM（TIMER2_CH1，部分重映射）
+  PWMC    PA15      C相正向 PWM（TIMER1_CH0，完全重映射）
+  PWMCN   PB3       C相逻辑互补 PWM（TIMER1_CH1，完全重映射）
+
+定时器参数为 `PSC=0`、`ARR=1199`（定时器时钟 120 MHz）。启动前预装 TIMER3/TIMER2/TIMER1 的 CNT 为 0/800/400，使三相正向输出的周期起点依次相隔约 3.333 μs。CH0 使用 PWM0，CH1 使用 PWM1 并共用同一 CCR。
+
+占空比接口使用 `float`，但硬件周期只有 1200 个计数，分辨率约为 0.08333%。浮点输入直接截断量化为整数 CCR；例如请求 20.1% 时 CCR=241，正向实际占空比约为 20.0833%，互补输出约为 79.9167%。
+
+> 安全限制：TIMER1/TIMER2/TIMER3 没有硬件死区单元，当前六路输出只有严格逻辑反相且死区为 0。不得直接用于要求 MCU 内部死区保护的功率级。
 
 
 驱动器：
@@ -86,6 +92,8 @@ PWM由 MCU TIM1\TIM2\TIM3 定时器的CH1\CH2分别输出。
   ADCB   PA1       ADCx_IN1
   ADCC   PA2       ADCx_IN2
 
+三相电流由 ADC1 规则序列间断采样。TIMER0 以 300 kHz 运行，并通过 CH0 周期末尾比较事件触发 ADC1；每次只转换一个通道，按 ADCA、ADCB、ADCC 轮转，因此每相更新率为 100 kHz。TIMER0 通过 ITI3 Event 从模式由 TIMER3 同步启动。
+
 对应检测电路：
 
 -   A相：R38（5mΩ）
@@ -96,26 +104,28 @@ PWM由 MCU TIM1\TIM2\TIM3 定时器的CH1\CH2分别输出。
 
 ## 6. 电压、电流检测
 
-### 输出电压检测
-
-    信号     MCU引脚   ADC通道
-  -------- --------- ----------
-  ADC_UOUT    PA3     ADCx_IN3
-
-用于检测 Boost 输出母线电压。
-
 ### 输出电流检测
 
     信号     MCU引脚   ADC通道
   -------- --------- ----------
-  ADC_IOUT    PA4     ADCx_IN4
+  ADC_IOUT    PA3     ADC0_IN3
 
 用于检测负载输出电流。
 
-### 输入电压检测
+### 输出电压检测
+
     信号     MCU引脚   ADC通道
   -------- --------- ----------
-  ADC_POW    PA5     ADCx_IN5
+  ADC_UOUT    PA4     ADC0_IN4
+
+用于检测 Boost 输出母线电压。
+
+### 输入电压检测
+  信号     MCU引脚   ADC通道
+  -------- --------- ----------
+  ADC_POW    PA5     ADC0_IN5
+
+PA3、PA4、PA5 由 ADC0 软件触发连续扫描。ADC0 时钟为 30 MHz，采用 71.5 周期采样、硬件 8 倍过采样和 3 位右移；DMA0_CH0 使用 2 帧循环缓冲，半满和全满中断各向双软件快照发布一组三通道平均 raw。BSP 只提供带序号和校验令牌的只读快照地址，不进行软件平均或物理量换算，理论快照更新率约为 14.9 kHz。
 
 ------------------------------------------------------------------------
 
@@ -135,6 +145,9 @@ PWM由 MCU TIM1\TIM2\TIM3 定时器的CH1\CH2分别输出。
   USART0_RX   PA10
 
 ### I2C 接口
+
+> 注意：PB6/PB7 已分配给 A 相 PWM（PWMA/PWMAN），不能再同时作为 I2C0。
+> 当前 I2C0 引脚说明仅为旧配置；启用 A 相 PWM 时，必须将 I2C0 迁移到其他可用引脚/外设。
 
 接口：
 
@@ -181,6 +194,18 @@ SWD：
   KEY2   PB15
   KEY3   PB14
   KEY4   PB13
+
+四个按键均按低电平有效配置，GPIO 使用内部上拉。下降沿 EXTI 中断只记录待处理标志，主循环中的非阻塞按键任务经过 20 ms 稳定消抖后触发一次按下回调；稳定松开后才允许再次触发。
+
+按键业务绑定由实例工程 Application 层完成：KEY1 反转 PB12 SHUTOFF 输出，KEY2 请求启动 Boost，KEY3 请求停止 Boost，KEY4 请求清除 Boost 锁存故障。
+
+### SHUTOFF 输出
+
+  信号      MCU引脚   GPIO模式
+  --------- --------- ----------------
+  SHUTOFF   PB12      50 MHz 推挽输出
+
+PB12 在切换为输出模式前先清零输出锁存，初始化完成后保持低电平；后续每次 KEY1 稳定按下时反转一次电平。低电平仅表示软件规定的初始状态，本文档不额外定义 SHUTOFF 的硬件有效极性。
 
 ### LED
 

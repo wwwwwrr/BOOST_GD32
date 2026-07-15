@@ -1,8 +1,9 @@
 #include "usart.h"
+#include <stdio.h>
 
 /* Private variables */
-static uint8_t rx_buffer[USART1_RX_BUFFER_SIZE];
-static uint8_t tx_buffer[USART1_TX_BUFFER_SIZE];
+static uint8_t rx_buffer[USART0_RX_BUFFER_SIZE];
+static uint8_t tx_buffer[USART0_TX_BUFFER_SIZE];
 static volatile uint16_t rx_head = 0;
 static volatile uint16_t rx_tail = 0;
 static volatile uint16_t tx_head = 0;
@@ -12,54 +13,54 @@ static volatile uint8_t loopback_enabled = 0;
 static usart_rx_callback_t rx_callback = NULL;
 
 /* Private function prototypes */
-static uint8_t USART1_BufferIsFull(uint16_t head, uint16_t tail, uint16_t size);
-static uint8_t USART1_BufferIsEmpty(uint16_t head, uint16_t tail);
-static void USART1_EnableInterrupts(void);
-static void USART1_DisableInterrupts(void);
+static uint8_t USART0_BufferIsFull(uint16_t head, uint16_t tail, uint16_t size);
+static uint8_t USART0_BufferIsEmpty(uint16_t head, uint16_t tail);
+static void USART0_EnableInterrupts(void);
+static void USART0_DisableInterrupts(void);
 
 /*!
-    \brief      Initialize USART1 for loopback operation
+    \brief      Initialize USART0 on PA9/PA10 for communication
     \param[in]  none
     \param[out] none
     \retval     none
 */
-void USART1_Init(void)
+void USART0_Init(void)
 {
     /* Enable GPIO and USART clocks */
-    rcu_periph_clock_enable(USART1_GPIO_RCU);
-    rcu_periph_clock_enable(USART1_RCU);
+    rcu_periph_clock_enable(USART0_GPIO_RCU);
+    rcu_periph_clock_enable(USART0_RCU);
     
-    /* Configure GPIO pins for USART1 */
-    gpio_init(USART1_GPIO, GPIO_MODE_AF_PP, GPIO_OSPEED_50MHZ, USART1_TX_PIN);
-    gpio_init(USART1_GPIO, GPIO_MODE_IN_FLOATING, GPIO_OSPEED_50MHZ, USART1_RX_PIN);
+    /* Configure PA9 as TX and PA10 as RX on the default USART0 mapping. */
+    gpio_init(USART0_GPIO, GPIO_MODE_AF_PP, GPIO_OSPEED_50MHZ, USART0_TX_PIN);
+    gpio_init(USART0_GPIO, GPIO_MODE_IN_FLOATING, GPIO_OSPEED_50MHZ, USART0_RX_PIN);
     
     /* USART parameter configuration */
-    usart_deinit(USART1_PERIPH);
-    usart_baudrate_set(USART1_PERIPH, USART1_BAUDRATE);
-    usart_word_length_set(USART1_PERIPH, USART1_WORD_LENGTH);
-    usart_stop_bit_set(USART1_PERIPH, USART1_STOP_BITS);
-    usart_parity_config(USART1_PERIPH, USART1_PARITY);
-    usart_hardware_flow_rts_config(USART1_PERIPH, USART1_HARDWARE_FLOW);
-    usart_hardware_flow_cts_config(USART1_PERIPH, USART_CTS_DISABLE);
+    usart_deinit(USART0_PERIPH);
+    usart_baudrate_set(USART0_PERIPH, USART0_BAUDRATE);
+    usart_word_length_set(USART0_PERIPH, USART0_WORD_LENGTH);
+    usart_stop_bit_set(USART0_PERIPH, USART0_STOP_BITS);
+    usart_parity_config(USART0_PERIPH, USART0_PARITY);
+    usart_hardware_flow_rts_config(USART0_PERIPH, USART0_HARDWARE_FLOW);
+    usart_hardware_flow_cts_config(USART0_PERIPH, USART_CTS_DISABLE);
 
-    usart_receive_config(USART1_PERIPH, USART_RECEIVE_ENABLE);
-    usart_transmit_config(USART1_PERIPH, USART_TRANSMIT_ENABLE);
+    usart_receive_config(USART0_PERIPH, USART_RECEIVE_ENABLE);
+    usart_transmit_config(USART0_PERIPH, USART_TRANSMIT_ENABLE);
     
     
     /* Enable USART */
-    usart_enable(USART1_PERIPH);
+    usart_enable(USART0_PERIPH);
     
     /* Clear buffers */
-    USART1_ClearBuffers();
+    USART0_ClearBuffers();
     
     /* Enable USART receive interrupt */
-    usart_interrupt_enable(USART1_PERIPH, USART_INT_RBNE);
+    usart_interrupt_enable(USART0_PERIPH, USART_INT_RBNE);
     
-    /* Configure NVIC for USART1 */
-    NVIC_CONFIG(USART1_IRQn, USART1_PRIORITY_GROUP, USART1_PRIORITY_SUBGROUP);
+    /* Configure NVIC for USART0. */
+    NVIC_CONFIG(USART0_IRQN, USART0_PRIORITY_GROUP, USART0_PRIORITY_SUBGROUP);
     
-    /* Initially enable loopback */
-    USART1_LoopbackEnable();
+    /* Debug output must not be mixed with automatic receive echo. */
+    USART0_LoopbackDisable();
 }
 
 /*!
@@ -68,7 +69,7 @@ void USART1_Init(void)
     \param[out] none
     \retval     none
 */
-void USART1_LoopbackEnable(void)
+void USART0_LoopbackEnable(void)
 {
     loopback_enabled = 1;
 }
@@ -79,53 +80,53 @@ void USART1_LoopbackEnable(void)
     \param[out] none
     \retval     none
 */
-void USART1_LoopbackDisable(void)
+void USART0_LoopbackDisable(void)
 {
     loopback_enabled = 0;
 }
 
 /*!
-    \brief      Send a byte via USART1
+    \brief      Send a byte via USART0
     \param[in]  data: byte to send
     \param[out] none
     \retval     status of operation
 */
-usart_status_t USART1_SendByte(uint8_t data)
+usart_status_t USART0_SendByte(uint8_t data)
 {
-    USART1_DisableInterrupts();
+    USART0_DisableInterrupts();
     
     /* Check if TX buffer is full */
-    if (USART1_BufferIsFull(tx_head, tx_tail, USART1_TX_BUFFER_SIZE)) {
-        USART1_EnableInterrupts();
+    if (USART0_BufferIsFull(tx_head, tx_tail, USART0_TX_BUFFER_SIZE)) {
+        USART0_EnableInterrupts();
         return USART_STATUS_BUFFER_FULL;
     }
     
     /* Add data to TX buffer */
     tx_buffer[tx_head] = data;
-    tx_head = (tx_head + 1) % USART1_TX_BUFFER_SIZE;
+    tx_head = (tx_head + 1) % USART0_TX_BUFFER_SIZE;
     
     /* If transmitter is idle, start transmission */
     if (!tx_busy) {
         tx_busy = 1;
-        usart_interrupt_enable(USART1_PERIPH, USART_INT_TBE);
+        usart_interrupt_enable(USART0_PERIPH, USART_INT_TBE);
     }
     
-    USART1_EnableInterrupts();
+    USART0_EnableInterrupts();
     return USART_STATUS_OK;
 }
 
 /*!
-    \brief      Send a string via USART1
+    \brief      Send a string via USART0
     \param[in]  str: null-terminated string to send
     \param[out] none
     \retval     status of operation
 */
-usart_status_t USART1_SendString(const char *str)
+usart_status_t USART0_SendString(const char *str)
 {
     usart_status_t status;
     
     while (*str) {
-        status = USART1_SendByte(*str++);
+        status = USART0_SendByte(*str++);
         if (status != USART_STATUS_OK) {
             return status;
         }
@@ -135,23 +136,45 @@ usart_status_t USART1_SendString(const char *str)
 }
 
 /*!
-    \brief      Receive a byte from USART1 buffer
+    \brief      Retarget the C library standard output to USART0
+    \param[in]  ch: character generated by printf
+    \param[in]  stream: standard library stream, unused by the UART driver
+    \retval     transmitted character on success, EOF on failure
+    \note       Call printf only from thread/main-loop context.
+*/
+int fputc(int ch, FILE *stream)
+{
+    usart_status_t status;
+
+    (void)stream;
+    do {
+        status = USART0_SendByte((uint8_t)ch);
+    } while (status == USART_STATUS_BUFFER_FULL);
+
+    if (status != USART_STATUS_OK) {
+        return EOF;
+    }
+    return ch;
+}
+
+/*!
+    \brief      Receive a byte from USART0 buffer
     \param[in]  none
     \param[out] none
     \retval     received byte (0 if buffer empty)
 */
-uint8_t USART1_ReceiveByte(void)
+uint8_t USART0_ReceiveByte(void)
 {
     uint8_t data = 0;
     
-    USART1_DisableInterrupts();
+    USART0_DisableInterrupts();
     
-    if (!USART1_BufferIsEmpty(rx_head, rx_tail)) {
+    if (!USART0_BufferIsEmpty(rx_head, rx_tail)) {
         data = rx_buffer[rx_tail];
-        rx_tail = (rx_tail + 1) % USART1_RX_BUFFER_SIZE;
+        rx_tail = (rx_tail + 1) % USART0_RX_BUFFER_SIZE;
     }
     
-    USART1_EnableInterrupts();
+    USART0_EnableInterrupts();
     
     return data;
 }
@@ -162,20 +185,20 @@ uint8_t USART1_ReceiveByte(void)
     \param[out] none
     \retval     1 if data available, 0 otherwise
 */
-uint8_t USART1_IsDataAvailable(void)
+uint8_t USART0_IsDataAvailable(void)
 {
-    return !USART1_BufferIsEmpty(rx_head, rx_tail);
+    return !USART0_BufferIsEmpty(rx_head, rx_tail);
 }
 
 /*!
-    \brief      Clear USART1 buffers
+    \brief      Clear USART0 buffers
     \param[in]  none
     \param[out] none
     \retval     none
 */
-void USART1_ClearBuffers(void)
+void USART0_ClearBuffers(void)
 {
-    USART1_DisableInterrupts();
+    USART0_DisableInterrupts();
     
     rx_head = 0;
     rx_tail = 0;
@@ -186,7 +209,7 @@ void USART1_ClearBuffers(void)
     memset(rx_buffer, 0, sizeof(rx_buffer));
     memset(tx_buffer, 0, sizeof(tx_buffer));
     
-    USART1_EnableInterrupts();
+    USART0_EnableInterrupts();
 }
 
 /*!
@@ -195,27 +218,27 @@ void USART1_ClearBuffers(void)
     \param[out] none
     \retval     none
 */
-void USART1_SetRxCallback(usart_rx_callback_t callback)
+void USART0_SetRxCallback(usart_rx_callback_t callback)
 {
     rx_callback = callback;
 }
 
 /*!
-    \brief      USART1 interrupt handler implementation
+    \brief      USART0 interrupt handler implementation
     \param[in]  none
     \param[out] none
     \retval     none
 */
-static void USART1_HandlerInternal(void)
+static void USART0_HandlerInternal(void)
 {
     /* Receive buffer not empty interrupt */
-    if (usart_interrupt_flag_get(USART1_PERIPH, USART_INT_FLAG_RBNE) != RESET) {
-        uint8_t data = usart_data_receive(USART1_PERIPH);
+    if (usart_interrupt_flag_get(USART0_PERIPH, USART_INT_FLAG_RBNE) != RESET) {
+        uint8_t data = usart_data_receive(USART0_PERIPH);
         
         /* Add to RX buffer */
-        if (!USART1_BufferIsFull(rx_head, rx_tail, USART1_RX_BUFFER_SIZE)) {
+        if (!USART0_BufferIsFull(rx_head, rx_tail, USART0_RX_BUFFER_SIZE)) {
             rx_buffer[rx_head] = data;
-            rx_head = (rx_head + 1) % USART1_RX_BUFFER_SIZE;
+            rx_head = (rx_head + 1) % USART0_RX_BUFFER_SIZE;
             
             /* Call callback if set */
             if (rx_callback != NULL) {
@@ -224,38 +247,38 @@ static void USART1_HandlerInternal(void)
             
             /* Loopback: echo received data */
             if (loopback_enabled) {
-                USART1_SendByte(data);
+                USART0_SendByte(data);
             }
         }
         
-        usart_interrupt_flag_clear(USART1_PERIPH, USART_INT_FLAG_RBNE);
+        usart_interrupt_flag_clear(USART0_PERIPH, USART_INT_FLAG_RBNE);
     }
     
     /* Transmit buffer empty interrupt */
-    if (usart_interrupt_flag_get(USART1_PERIPH, USART_INT_FLAG_TBE) != RESET) {
-        if (!USART1_BufferIsEmpty(tx_head, tx_tail)) {
+    if (usart_interrupt_flag_get(USART0_PERIPH, USART_INT_FLAG_TBE) != RESET) {
+        if (!USART0_BufferIsEmpty(tx_head, tx_tail)) {
             /* Send next byte */
-            usart_data_transmit(USART1_PERIPH, tx_buffer[tx_tail]);
-            tx_tail = (tx_tail + 1) % USART1_TX_BUFFER_SIZE;
+            usart_data_transmit(USART0_PERIPH, tx_buffer[tx_tail]);
+            tx_tail = (tx_tail + 1) % USART0_TX_BUFFER_SIZE;
         } else {
             /* No more data to send, disable TBE interrupt */
-            usart_interrupt_disable(USART1_PERIPH, USART_INT_TBE);
+            usart_interrupt_disable(USART0_PERIPH, USART_INT_TBE);
             tx_busy = 0;
         }
         
-        usart_interrupt_flag_clear(USART1_PERIPH, USART_INT_FLAG_TBE);
+        usart_interrupt_flag_clear(USART0_PERIPH, USART_INT_FLAG_TBE);
     }
 }
 
 /*!
-    \brief      USART1 interrupt handler (to be called from gd32f30x_it.c)
+    \brief      USART0 interrupt handler (to be called from gd32f30x_it.c)
     \param[in]  none
     \param[out] none
     \retval     none
 */
-void USART1_IRQHandler_Internal(void)
+void USART0_IRQHandler_Internal(void)
 {
-    USART1_HandlerInternal();
+    USART0_HandlerInternal();
 }
 
 /*!
@@ -266,7 +289,7 @@ void USART1_IRQHandler_Internal(void)
     \param[out] none
     \retval     1 if full, 0 otherwise
 */
-static uint8_t USART1_BufferIsFull(uint16_t head, uint16_t tail, uint16_t size)
+static uint8_t USART0_BufferIsFull(uint16_t head, uint16_t tail, uint16_t size)
 {
     return ((head + 1) % size) == tail;
 }
@@ -278,33 +301,33 @@ static uint8_t USART1_BufferIsFull(uint16_t head, uint16_t tail, uint16_t size)
     \param[out] none
     \retval     1 if empty, 0 otherwise
 */
-static uint8_t USART1_BufferIsEmpty(uint16_t head, uint16_t tail)
+static uint8_t USART0_BufferIsEmpty(uint16_t head, uint16_t tail)
 {
     return head == tail;
 }
 
 /*!
-    \brief      Disable USART1 interrupts (for critical sections)
+    \brief      Disable USART0 interrupts (for critical sections)
     \param[in]  none
     \param[out] none
     \retval     none
 */
-static void USART1_DisableInterrupts(void)
+static void USART0_DisableInterrupts(void)
 {
-    usart_interrupt_disable(USART1_PERIPH, USART_INT_RBNE);
-    usart_interrupt_disable(USART1_PERIPH, USART_INT_TBE);
+    usart_interrupt_disable(USART0_PERIPH, USART_INT_RBNE);
+    usart_interrupt_disable(USART0_PERIPH, USART_INT_TBE);
 }
 
 /*!
-    \brief      Enable USART1 interrupts
+    \brief      Enable USART0 interrupts
     \param[in]  none
     \param[out] none
     \retval     none
 */
-static void USART1_EnableInterrupts(void)
+static void USART0_EnableInterrupts(void)
 {
-    usart_interrupt_enable(USART1_PERIPH, USART_INT_RBNE);
+    usart_interrupt_enable(USART0_PERIPH, USART_INT_RBNE);
     if (tx_busy) {
-        usart_interrupt_enable(USART1_PERIPH, USART_INT_TBE);
+        usart_interrupt_enable(USART0_PERIPH, USART_INT_TBE);
     }
 }

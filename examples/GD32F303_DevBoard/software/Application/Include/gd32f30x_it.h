@@ -29,13 +29,22 @@ void DebugMon_Handler(void);
 void PendSV_Handler(void);
 /* this function handles SysTick exception */
 void SysTick_Handler(void);
-/* this function handles TIMER2 interrupt */
-void TIMER2_IRQHandler(void);
-/* this function handles USART1 interrupt */
-void USART1_IRQHandler(void);
-/* this function handles TIMER1 interrupt */
-void TIMER1_IRQHandler(void);
+/* this function handles USART0 interrupt */
+void USART0_IRQHandler(void);
+/*!
+    \brief      处理 TIMER4 10 kHz Boost 控制中断
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+void TIMER4_IRQHandler(void);
 /* this function handles DMA0 Channel0 interrupt */
 void DMA0_Channel0_IRQHandler(void);
+/* this function handles ADC0 and ADC1 interrupts */
+void ADC0_1_IRQHandler(void);
+/* this function handles EXTI5 to EXTI9 interrupts */
+void EXTI5_9_IRQHandler(void);
+/* this function handles EXTI10 to EXTI15 interrupts */
+void EXTI10_15_IRQHandler(void);
 
 #endif /* GD32F30X_IT_H */

@@ -36,9 +36,7 @@
 |------|------|------|
 | ADC | 三相电流采样、输出电压/电流检测 | `ADC/adc.c/.h` |
 | PWM | 三相交错 Boost PWM 输出 | `PWM/pwm.c/.h` |
-| TIMER1 | 定时器中断（算法调度） | `TIMER1/timer1.c/.h` |
-| TIMER2 | 定时器中断 | `TIMER2/timer2.c/.h` |
-| USART | 串口通信（USART1） | `USART/usart.c/.h` |
+| USART | 板载 CH340N 串口通信（USART0，PA9/PA10） | `USART/usart.c/.h` |
 | USART2 | 扩展串口（USART2） | `USART/usart2.c/.h` |
 | I2C | I2C 总线驱动 | `I2C/i2c.c/.h` |
 | AS5600 | 磁编码器驱动 | `AS5600/as5600.c/.h` |
@@ -48,8 +46,10 @@
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `Application/Source/main.c` | ⚠️ **测试代码** | 当前为临时测试代码，正式开发时应删除重建 |
-| `Application/Include/main.h` | ⚠️ **测试代码** | 当前包含所有模块头文件，正式开发时应删除重建 |
+| `Application/Source/main.c` | 🟢 **可用** | 仅编排系统与 Application 上层模块的初始化和主循环任务 |
+| `Application/Source/app_key.c` | 🟢 **可用** | 连接 L1 Boost 命令与 L4 KEY/SHUTOFF |
+| `Application/Source/app_boost_monitor.c` | 🟢 **可用** | 连接 L1 Boost 上下文与 L4 USART0 调试输出 |
+| `Application/Include/main.h` | 🟢 **可用** | 汇总主程序所需上层接口 |
 | `Application/Include/interrupt_priority.h` | 🟢 **可用** | 中断优先级集中定义，可持续使用 |
 
 ## 1.4 ⚠️ 硬件文档与 BSP 代码不匹配
@@ -62,7 +62,6 @@
 |------|----------------------|-------------|------|
 | **PWM** | TIM1/TIM2/TIM3 → PB6/PB7/PB5/PB4/PB3/PA15 | TIMER0 → PA8/PA9/PA10 + PB13/PB14/PB15 | 管脚完全不匹配 |
 | **ADC** | PA0/PA1/PA2 (3路相电流) | PA6/PA7 (2路相电流) | 通道和数量均不同 |
-| **USART** | USART0 (PA9/PA10) | USART1 (PA2/PA3) | 端口号不同 |
 | **LED** | PC13/PC14/PC15 | PB3/PB4/PB5 | 管脚不同 |
 | **按键** | PA8/PB15/PB14/PB13 | ❌ 无对应驱动（这些脚被 PWM 占用） | 无实际按键驱动 |
 

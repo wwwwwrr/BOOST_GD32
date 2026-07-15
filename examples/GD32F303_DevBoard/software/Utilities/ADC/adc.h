@@ -1,94 +1,76 @@
 /*!
     \file    adc.h
-    \brief   ADC driver for current sampling in FOC motor control
+    \brief   ADC0 监测量与 ADC1 三相电流采样驱动
 
-    \version 2026-03-12, V1.0.0, ADC driver for GD32F30x
+    \version 2026-7-13, V2.1.0, dual ADC sampling for GD32F30x
 */
 
-#ifndef _ADC_H_
-#define _ADC_H_
+#ifndef ADC_H
+#define ADC_H
 
 #include "gd32f30x.h"
-#include "systick.h"
-#include <stddef.h>
-#include <string.h>
 
-/* ADC peripheral definitions */
-#define ADC1_PERIPH           ADC0
-#define ADC1_RCU              RCU_ADC0
+/* ADC0 循环 DMA 布局：共两帧，每帧三个通道。 */
+#define ADC0_DMA_FRAME_COUNT              2U
+#define ADC0_DMA_HALF_FRAME_COUNT         (ADC0_DMA_FRAME_COUNT / 2U)
+#define ADC0_MONITOR_CHANNEL_COUNT        3U
 
-/* ADC channel definitions */
-#define ADC_CHANNEL_PA6       ADC_CHANNEL_6     /* Phase A current */
-#define ADC_CHANNEL_PA7       ADC_CHANNEL_7     /* Phase B current */
-
-/* ADC GPIO definitions */
-#define ADC_GPIO_PA6_RCU      RCU_GPIOA
-#define ADC_GPIO_PA6_PORT     GPIOA
-#define ADC_GPIO_PA6_PIN      GPIO_PIN_6
-
-#define ADC_GPIO_PA7_RCU      RCU_GPIOA
-#define ADC_GPIO_PA7_PORT     GPIOA
-#define ADC_GPIO_PA7_PIN      GPIO_PIN_7
-
-/* ADC configuration */
-#define ADC_SAMPLE_TIME       ADC_SAMPLETIME_55POINT5  /* Maximum resolution */
-#define ADC_RESOLUTION        ADC_RESOLUTION_12B       /* 12-bit resolution */
-#define ADC_EXTERNAL_TRIGGER  ADC0_1_EXTTRIG_ROUTINE_T0_CH0  /* TIMER0 CH0 trigger */
-#define ADC_REGULAR_CHANNEL   ADC_ROUTINE_CHANNEL      /* Routine channel (regular channel) */
-
-/* DMA configuration */
-#define ADC_DMA_PERIPH        DMA0
-#define ADC_DMA_CHANNEL       DMA_CH0
-#define ADC_DMA_RCU           RCU_DMA0
-
-/* Buffer configuration */
-#define ADC_BUFFER_SIZE       64     /* DMA buffer size (samples per channel) */
-#define ADC_CHANNEL_COUNT     2       /* Number of channels: PA6 and PA7 */
-
-/* Current calculation constants */
-#define ADC_VREF              3.3f    /* Reference voltage (V) */
-#define ADC_MAX_VALUE         4095.0f /* 12-bit ADC max value */
-#define ADC_ZERO_CURRENT_VOLTAGE (ADC_VREF / 2.0f) /* Voltage at zero current */
-#define CURRENT_SCALE_FACTOR  (20.0f / (ADC_VREF / 2.0f)) /* 20A range, ±VREF/2 */
-
-/* Data structures */
 typedef struct {
-    uint16_t phase_a_raw;     /* Raw ADC value for phase A */
-    uint16_t phase_b_raw;     /* Raw ADC value for phase B */
-    float phase_a_current;    /* Calculated current for phase A (A) */
-    float phase_b_current;    /* Calculated current for phase B (A) */
-    float phase_a_voltage;    /* Calculated voltage for phase A (V) */
-    float phase_b_voltage;    /* Calculated voltage for phase B (V) */
-} adc_sample_t;
+    uint16_t output_current_raw;           /*!< PA3 输出电流硬件8倍平均 raw */
+    uint16_t output_voltage_raw;           /*!< PA4 输出电压硬件8倍平均 raw */
+    uint16_t input_voltage_raw;            /*!< PA5 输入电压硬件8倍平均 raw */
+} adc0_frame_raw_t;
+
+typedef struct {
+    const volatile adc0_frame_raw_t *frame; /*!< 当前已发布完整快照的只读地址 */
+    uint32_t sequence;                     /*!< 当前完整快照的发布序号，不是地址 */
+} adc0_snapshot_view_t;
+
+typedef struct {
+    uint16_t phase_a_raw;                  /*!< PA0 对应的 A 相电流 raw */
+    uint16_t phase_b_raw;                  /*!< PA1 对应的 B 相电流 raw */
+    uint16_t phase_c_raw;                  /*!< PA2 对应的 C 相电流 raw */
+    uint32_t sequence;                     /*!< 完整三相采样组的发布序号 */
+} adc1_phase_raw_t;
 
 typedef enum {
-    ADC_STATUS_OK = 0,
-    ADC_STATUS_ERROR,
-    ADC_STATUS_NOT_INITIALIZED,
-    ADC_STATUS_DMA_ERROR
+    ADC_STATUS_OK = 0,                     /*!< 操作成功 */
+    ADC_STATUS_ERROR,                      /*!< 未分类的底层错误 */
+    ADC_STATUS_NOT_INITIALIZED,            /*!< ADC 底层尚未初始化 */
+    ADC_STATUS_NOT_READY,                  /*!< 尚无完整采样数据 */
+    ADC_STATUS_INVALID_PARAMETER,          /*!< 调用参数无效 */
+    ADC_STATUS_DMA_ERROR                   /*!< ADC0 DMA 传输错误 */
 } adc_status_t;
 
-/* Function prototypes */
+/* 配置 ADC0、ADC1、DMA0 通道0和 TIMER0 触发从定时器。 */
 void ADC_Init(void);
+
+/* 启动 ADC0 连续采集，并使 ADC1/TIMER0 触发链进入工作状态。 */
 void ADC_Start(void);
+
+/* 停止两路 ADC 采集及 TIMER0。 */
 void ADC_Stop(void);
-adc_status_t ADC_GetSample(adc_sample_t *sample);
-adc_status_t ADC_GetLatestSamples(adc_sample_t *samples, uint16_t count);
-float ADC_RawToVoltage(uint16_t raw_value);
-float ADC_VoltageToCurrent(float voltage);
-float ADC_RawToCurrent(uint16_t raw_value);
-void ADC_CalibrateZeroOffset(void);
-adc_status_t ADC_DMA_IsComplete(void);
-void ADC_SetTriggerFrequency(uint32_t frequency_hz);
 
-/* DMA interrupt handler (called from ISR) */
+/*!
+    \brief      获取最新完整 ADC0 硬件过采样快照的只读地址
+    \param[out] snapshot: 当前完整快照的只读地址和发布序号
+    \retval     ADC_STATUS_OK: 成功
+    \retval     其他状态: 未初始化、数据未就绪、参数错误或 DMA 错误
+*/
+adc_status_t ADC0_GetLatestSnapshot(adc0_snapshot_view_t *snapshot);
+
+/* 返回 ADC0 最近一次完整快照的发布序号。 */
+uint32_t ADC0_GetSnapshotSequence(void);
+
+/* 读取 ADC1 最新完整的 A/B/C 三相 raw 采样组。 */
+adc_status_t ADC1_GetLatestRaw(adc1_phase_raw_t *result,
+                               uint8_t *new_data);
+
+/* 返回 ADC1 最近一次完整三相组的发布序号。 */
+uint32_t ADC1_GetSequence(void);
+
+/* 由 gd32f30x_it.c 转发调用的内部中断处理入口。 */
 void ADC_DMA_IRQHandler_Internal(void);
+void ADC1_IRQHandler_Internal(void);
 
-/* Private functions (not to be called externally) */
-static void ADC_GPIO_Config(void);
-static void ADC_DMA_Config(void);
-static void ADC_Config(void);
-
-#endif /* _ADC_H_ */
-
-
+#endif /* ADC_H */
