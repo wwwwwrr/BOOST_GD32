@@ -53,7 +53,6 @@ void AppBoostMonitor_Task(void)
         APP_BOOST_MONITOR_PRINT_PERIOD_MS) {
         return;
     }
-
     boost_monitor_last_print_tick = current_tick;
     if (BoostControl_GetContext(&context) != 0U) {
         AppBoostMonitor_Print(&context);

@@ -33,6 +33,7 @@ OF SUCH DAMAGE.
 */
 
 #include "gd32f30x.h"
+#include "interrupt_priority.h"
 #include "systick.h"
 
 volatile static uint32_t delay;
@@ -53,7 +54,7 @@ void systick_config(void)
         }
     }
     /* configure the systick handler priority */
-    NVIC_SetPriority(SysTick_IRQn, 0x00U);
+    NVIC_SetPriority(SysTick_IRQn, SYSTICK_PRIORITY_GROUP);
 }
 
 /*!

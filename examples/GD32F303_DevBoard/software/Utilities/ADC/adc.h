@@ -22,25 +22,10 @@ typedef struct {
 } adc0_frame_raw_t;
 
 typedef struct {
-    const volatile adc0_frame_raw_t *frame; /*!< 当前已发布完整快照的只读地址 */
-    uint32_t sequence;                     /*!< 当前完整快照的发布序号，不是地址 */
-} adc0_snapshot_view_t;
-
-typedef struct {
     uint16_t phase_a_raw;                  /*!< PA0 对应的 A 相电流 raw */
     uint16_t phase_b_raw;                  /*!< PA1 对应的 B 相电流 raw */
     uint16_t phase_c_raw;                  /*!< PA2 对应的 C 相电流 raw */
-    uint32_t sequence;                     /*!< 完整三相采样组的发布序号 */
 } adc1_phase_raw_t;
-
-typedef enum {
-    ADC_STATUS_OK = 0,                     /*!< 操作成功 */
-    ADC_STATUS_ERROR,                      /*!< 未分类的底层错误 */
-    ADC_STATUS_NOT_INITIALIZED,            /*!< ADC 底层尚未初始化 */
-    ADC_STATUS_NOT_READY,                  /*!< 尚无完整采样数据 */
-    ADC_STATUS_INVALID_PARAMETER,          /*!< 调用参数无效 */
-    ADC_STATUS_DMA_ERROR                   /*!< ADC0 DMA 传输错误 */
-} adc_status_t;
 
 /* 配置 ADC0、ADC1、DMA0 通道0和 TIMER0 触发从定时器。 */
 void ADC_Init(void);
@@ -52,22 +37,16 @@ void ADC_Start(void);
 void ADC_Stop(void);
 
 /*!
-    \brief      获取最新完整 ADC0 硬件过采样快照的只读地址
-    \param[out] snapshot: 当前完整快照的只读地址和发布序号
-    \retval     ADC_STATUS_OK: 成功
-    \retval     其他状态: 未初始化、数据未就绪、参数错误或 DMA 错误
+    \brief      复制最新完整 ADC0 硬件过采样 raw
+    \param[out] result: 输出电流、输出电压和输入电压 raw
+    \param[out] sequence: 当前完整数据的发布序号
+    \retval     1: 已复制有效数据
+    \retval     0: 参数无效或尚无完整数据
 */
-adc_status_t ADC0_GetLatestSnapshot(adc0_snapshot_view_t *snapshot);
+uint8_t ADC0_GetLatestRaw(adc0_frame_raw_t *result, uint32_t *sequence);
 
-/* 返回 ADC0 最近一次完整快照的发布序号。 */
-uint32_t ADC0_GetSnapshotSequence(void);
-
-/* 读取 ADC1 最新完整的 A/B/C 三相 raw 采样组。 */
-adc_status_t ADC1_GetLatestRaw(adc1_phase_raw_t *result,
-                               uint8_t *new_data);
-
-/* 返回 ADC1 最近一次完整三相组的发布序号。 */
-uint32_t ADC1_GetSequence(void);
+/* 读取 ADC1 的 A/B/C 各相最新 raw；三相均有效时返回1。 */
+uint8_t ADC1_GetLatestRaw(adc1_phase_raw_t *result);
 
 /* 由 gd32f30x_it.c 转发调用的内部中断处理入口。 */
 void ADC_DMA_IRQHandler_Internal(void);

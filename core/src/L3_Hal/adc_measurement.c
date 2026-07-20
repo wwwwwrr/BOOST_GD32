@@ -5,15 +5,14 @@
 
 static float ADCMeasurement_RawToAdcVoltage(uint16_t raw);
 static float ADCMeasurement_RawToPhaseCurrent(uint16_t raw);
-static adc_measurement_status_t ADCMeasurement_MapStatus(adc_status_t status);
-static void ADCMeasurement_ResetMonitorCache(void);
+static void ADCMeasurement_ResetCaches(void);
 
 /* 最近一次成功换算并提交的 ADC0 监测实际值缓存。 */
 static adc_monitor_value_t adc0_latest_value;
 /* 最近一次成功处理的 ADC0 完整快照发布序号。 */
 static uint32_t adc0_last_processed_sequence = 0U;
-/* ADC0 监测实际值缓存有效标志：1 表示可返回缓存值，0 表示尚未就绪。 */
-static uint8_t adc0_value_valid = 0U;
+/* 最近一次成功换算的 ADC1 三相实际电流缓存。 */
+static adc_phase_current_value_t adc1_latest_value;
 
 /*!
     \brief      初始化 ADC 实际值测量模块
@@ -23,7 +22,7 @@ static uint8_t adc0_value_valid = 0U;
 */
 void ADCMeasurement_Init(void)
 {
-    ADCMeasurement_ResetMonitorCache();
+    ADCMeasurement_ResetCaches();
     ADC_Init();
 }
 
@@ -35,7 +34,7 @@ void ADCMeasurement_Init(void)
 */
 void ADCMeasurement_Start(void)
 {
-    ADCMeasurement_ResetMonitorCache();
+    ADCMeasurement_ResetCaches();
     ADC_Start();
 }
 
@@ -51,96 +50,69 @@ void ADCMeasurement_Stop(void)
 }
 
 /*!
-    \brief      处理 ADC0 最新硬件8倍平均 raw 并换算监测实际值
-    \param[out] result: 输出电流、输出电压、输入电压及快照序号
-    \param[out] new_data: 新快照标志
-    \retval     ADC 实际值测量状态
+    \brief      换算 ADC0 最新硬件8倍平均 raw 并返回缓存值
+    \param[out] result: 输出电流、输出电压、输入电压及发布序号
+    \retval     无
 */
-adc_measurement_status_t ADCMeasurement_ProcessMonitor(
-    adc_monitor_value_t *result,
-    uint8_t *new_data)
+void ADCMeasurement_ProcessMonitor(adc_monitor_value_t *result)
 {
-    adc0_snapshot_view_t snapshot;          /*!< 底层返回的当前 ADC0 快照视图 */
+    adc0_frame_raw_t raw;                   /*!< 底层复制的最新 ADC0 raw */
     adc_monitor_value_t next_value;         /*!< 本次换算完成但尚未提交的实际值 */
-    adc_status_t status;                    /*!< 底层 ADC 快照读取状态 */
+    uint32_t sequence;                      /*!< 底层 ADC0 完整数据发布序号 */
     float adc_voltage;                      /*!< 当前 raw 对应的 ADC 引脚电压 */
-    uint16_t output_current_raw;            /*!< 从快照读取的输出电流 raw */
-    uint16_t output_voltage_raw;            /*!< 从快照读取的输出电压 raw */
-    uint16_t input_voltage_raw;             /*!< 从快照读取的输入电压 raw */
 
-    if ((result == NULL) || (new_data == NULL)) {
-        return ADC_MEASUREMENT_STATUS_INVALID_PARAMETER;
+    if (result == NULL) {
+        return;
     }
 
-    *new_data = 0U;
-    status = ADC0_GetLatestSnapshot(&snapshot);
-    if (status != ADC_STATUS_OK) {
-        return ADCMeasurement_MapStatus(status);
+    if ((ADC0_GetLatestRaw(&raw, &sequence) != 0U) &&
+        (sequence != adc0_last_processed_sequence)) {
+        adc_voltage = ADCMeasurement_RawToAdcVoltage(
+            raw.output_current_raw);
+        next_value.output_current_a = adc_voltage * BSP_ADC_IOUT_GAIN;
+
+        adc_voltage = ADCMeasurement_RawToAdcVoltage(
+            raw.output_voltage_raw);
+        next_value.output_voltage_v = adc_voltage * BSP_ADC_UOUT_GAIN;
+
+        adc_voltage = ADCMeasurement_RawToAdcVoltage(
+            raw.input_voltage_raw);
+        next_value.input_voltage_v = adc_voltage * BSP_ADC_POW_GAIN;
+        next_value.sequence = sequence;
+
+        adc0_latest_value = next_value;
+        adc0_last_processed_sequence = sequence;
     }
 
-    if (snapshot.sequence == adc0_last_processed_sequence) {
-        if (adc0_value_valid == 0U) {
-            return ADC_MEASUREMENT_STATUS_NOT_READY;
-        }
-        *result = adc0_latest_value;
-        return ADC_MEASUREMENT_STATUS_OK;
-    }
-
-    output_current_raw = snapshot.frame->output_current_raw;
-    output_voltage_raw = snapshot.frame->output_voltage_raw;
-    input_voltage_raw = snapshot.frame->input_voltage_raw;
-
-    adc_voltage = ADCMeasurement_RawToAdcVoltage(output_current_raw);
-    next_value.output_current_a = adc_voltage * BSP_ADC_IOUT_GAIN;
-
-    adc_voltage = ADCMeasurement_RawToAdcVoltage(output_voltage_raw);
-    next_value.output_voltage_v = adc_voltage * BSP_ADC_UOUT_GAIN;
-
-    adc_voltage = ADCMeasurement_RawToAdcVoltage(input_voltage_raw);
-    next_value.input_voltage_v = adc_voltage * BSP_ADC_POW_GAIN;
-    next_value.sequence = snapshot.sequence;
-
-    adc0_latest_value = next_value;
-    adc0_last_processed_sequence = snapshot.sequence;
-    adc0_value_valid = 1U;
     *result = adc0_latest_value;
-    *new_data = 1U;
-
-    return ADC_MEASUREMENT_STATUS_OK;
 }
 
 /*!
-    \brief      读取 ADC1 最新完整三相 raw 并换算三相实际电流
-    \param[out] result: 三相电流及三相组序号
-    \param[out] new_data: 新三相组标志
-    \retval     ADC 实际值测量状态
+    \brief      换算 ADC1 的 A/B/C 各相最新 raw 并返回缓存值
+    \param[out] result: 三相电流
+    \retval     无
 */
-adc_measurement_status_t ADCMeasurement_GetPhaseCurrents(
-    adc_phase_current_value_t *result,
-    uint8_t *new_data)
+void ADCMeasurement_GetPhaseCurrents(adc_phase_current_value_t *result)
 {
-    adc1_phase_raw_t raw;                   /*!< ADC1 最新完整三相 raw 采样组 */
-    adc_status_t status;                    /*!< 底层 ADC1 三相组读取状态 */
+    adc1_phase_raw_t raw;                   /*!< ADC1 A/B/C 各相最新 raw */
+    adc_phase_current_value_t next_value;   /*!< 本次换算完成但尚未提交的三相值 */
 
-    if ((result == NULL) || (new_data == NULL)) {
-        return ADC_MEASUREMENT_STATUS_INVALID_PARAMETER;
+    if (result == NULL) {
+        return;
     }
 
-    *new_data = 0U;
-    status = ADC1_GetLatestRaw(&raw, new_data);
-    if (status != ADC_STATUS_OK) {
-        return ADCMeasurement_MapStatus(status);
+    if (ADC1_GetLatestRaw(&raw) != 0U) {
+        next_value.phase_a_current_a =
+            ADCMeasurement_RawToPhaseCurrent(raw.phase_a_raw);
+        next_value.phase_b_current_a =
+            ADCMeasurement_RawToPhaseCurrent(raw.phase_b_raw);
+        next_value.phase_c_current_a =
+            ADCMeasurement_RawToPhaseCurrent(raw.phase_c_raw);
+
+        adc1_latest_value = next_value;
     }
 
-    result->phase_a_current_a =
-        ADCMeasurement_RawToPhaseCurrent(raw.phase_a_raw);
-    result->phase_b_current_a =
-        ADCMeasurement_RawToPhaseCurrent(raw.phase_b_raw);
-    result->phase_c_current_a =
-        ADCMeasurement_RawToPhaseCurrent(raw.phase_c_raw);
-    result->sequence = raw.sequence;
-
-    return ADC_MEASUREMENT_STATUS_OK;
+    *result = adc1_latest_value;
 }
 
 /*!
@@ -169,52 +141,20 @@ static float ADCMeasurement_RawToPhaseCurrent(uint16_t raw)
 }
 
 /*!
-    \brief      将底层 ADC 状态映射为平台无关的实际值测量状态
-    \param[in]  status: 底层 ADC 状态
-    \param[out] 无
-    \retval     对应的 ADC 实际值测量状态
-*/
-static adc_measurement_status_t ADCMeasurement_MapStatus(adc_status_t status)
-{
-    adc_measurement_status_t measurement_status; /*!< 映射后的 L3 测量状态 */
-
-    switch (status) {
-    case ADC_STATUS_OK:
-        measurement_status = ADC_MEASUREMENT_STATUS_OK;
-        break;
-    case ADC_STATUS_NOT_INITIALIZED:
-        measurement_status = ADC_MEASUREMENT_STATUS_NOT_INITIALIZED;
-        break;
-    case ADC_STATUS_NOT_READY:
-        measurement_status = ADC_MEASUREMENT_STATUS_NOT_READY;
-        break;
-    case ADC_STATUS_INVALID_PARAMETER:
-        measurement_status = ADC_MEASUREMENT_STATUS_INVALID_PARAMETER;
-        break;
-    case ADC_STATUS_DMA_ERROR:
-        measurement_status = ADC_MEASUREMENT_STATUS_ACQUISITION_ERROR;
-        break;
-    case ADC_STATUS_ERROR:
-    default:
-        measurement_status = ADC_MEASUREMENT_STATUS_ERROR;
-        break;
-    }
-
-    return measurement_status;
-}
-
-/*!
-    \brief      清除 ADC0 上层最后有效实际值和已处理序号
+    \brief      清除 ADC0 和 ADC1 的最后有效换算值及 ADC0 已处理序号
     \param[in]  无
     \param[out] 无
     \retval     无
 */
-static void ADCMeasurement_ResetMonitorCache(void)
+static void ADCMeasurement_ResetCaches(void)
 {
     adc0_latest_value.output_current_a = 0.0f;
     adc0_latest_value.output_voltage_v = 0.0f;
     adc0_latest_value.input_voltage_v = 0.0f;
     adc0_latest_value.sequence = 0U;
     adc0_last_processed_sequence = 0U;
-    adc0_value_valid = 0U;
+
+    adc1_latest_value.phase_a_current_a = 0.0f;
+    adc1_latest_value.phase_b_current_a = 0.0f;
+    adc1_latest_value.phase_c_current_a = 0.0f;
 }

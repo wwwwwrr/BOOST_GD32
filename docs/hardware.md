@@ -92,7 +92,7 @@ PWM 由三个普通定时器的 CH0/CH1 输出。TIMER3 为 A 相主定时器，
   ADCB   PA1       ADCx_IN1
   ADCC   PA2       ADCx_IN2
 
-三相电流由 ADC1 规则序列间断采样。TIMER0 以 300 kHz 运行，并通过 CH0 周期末尾比较事件触发 ADC1；每次只转换一个通道，按 ADCA、ADCB、ADCC 轮转，因此每相更新率为 100 kHz。TIMER0 通过 ITI3 Event 从模式由 TIMER3 同步启动。
+三相电流由 ADC1 长度为 1 的规则序列采样。TIMER0 以 300 kHz 运行，并通过 CH0 比较事件触发 ADC1；每次转换完成都会产生 EOC 中断，中断保存当前相位 raw 后将 Rank0 软件切换到下一相，按 ADCA、ADCB、ADCC 轮转，因此每相更新率为 100 kHz。读取接口返回三相各自的最近值，不保证来自同一轮轮转。TIMER0 通过 ITI3 Event 从模式由 TIMER3 同步启动。
 
 对应检测电路：
 

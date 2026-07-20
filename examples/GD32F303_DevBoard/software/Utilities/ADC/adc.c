@@ -28,7 +28,6 @@
 #define ADC0_OVERSAMPLING_RATIO           ADC_OVERSAMPLING_RATIO_MUL8
 
 #define ADC1_PHASE_CHANNEL_COUNT          3U
-#define ADC1_PUBLISHED_BUFFER_COUNT       2U
 #define ADC1_PHASE_A_CHANNEL              ADC_CHANNEL_0
 #define ADC1_PHASE_B_CHANNEL              ADC_CHANNEL_1
 #define ADC1_PHASE_C_CHANNEL              ADC_CHANNEL_2
@@ -43,7 +42,7 @@
 #define ADC_TRIGGER_PERIOD_COUNTS         (ADC_TRIGGER_TIMER_CLOCK_HZ / \
                                            ADC_TRIGGER_FREQUENCY_HZ)
 #define ADC_TRIGGER_TIMER_PERIOD          (ADC_TRIGGER_PERIOD_COUNTS - 1U)
-#define ADC_TRIGGER_COMPARE_VALUE         ADC_TRIGGER_TIMER_PERIOD
+#define ADC_TRIGGER_COMPARE_VALUE         300U
 
 #if ((ADC0_DMA_FRAME_COUNT % 2U) != 0U)
 #error "ADC0 DMA frame count must be even"
@@ -73,23 +72,18 @@ static volatile adc0_frame_raw_t
  * 高31位是完整快照发布序号。
  */
 static volatile uint32_t adc0_published_state = 0U;
-/* ADC0 DMA 传输错误锁存标志：1 表示发生过错误，0 表示正常。 */
-static volatile uint8_t adc0_dma_error = 0U;
-
-/* ADC1 尚未组成完整三相组的工作缓冲，每次 TIMER0_CH0 事件写入一相。 */
-static volatile uint16_t adc1_working_raw[ADC1_PHASE_CHANNEL_COUNT];
-/* ADC1 完整 A/B/C 三相采样组的双发布缓冲。 */
-static volatile uint16_t adc1_published_raw[ADC1_PUBLISHED_BUFFER_COUNT]
-                                                  [ADC1_PHASE_CHANNEL_COUNT];
-/* ADC1 发布状态：低1位是发布缓冲索引，高31位是完整三相组序号。 */
-static volatile uint32_t adc1_published_state = 0U;
-/* 下一次 ADC1 EOC 转换结果对应的相位下标，依次为 A、B、C。 */
-static volatile uint8_t adc1_next_phase = 0U;
-/* ADC1 工作缓冲中 A/B/C 三相是否已更新的位掩码。 */
+/* ADC1 软件轮转使用的 A/B/C 相通道表。 */
+static const uint8_t adc1_phase_channels[ADC1_PHASE_CHANNEL_COUNT] = {
+    ADC1_PHASE_A_CHANNEL,
+    ADC1_PHASE_B_CHANNEL,
+    ADC1_PHASE_C_CHANNEL
+};
+/* ADC1 A/B/C 各相最近一次转换结果，每次 EOC 中断只更新其中一项。 */
+static volatile uint16_t adc1_latest_raw[ADC1_PHASE_CHANNEL_COUNT];
+/* ADC1 当前 Rank0 对应的相位下标，依次为 A、B、C。 */
+static volatile uint8_t adc1_current_phase = 0U;
+/* ADC1 A/B/C 三相是否至少各完成过一次转换的位掩码。 */
 static volatile uint8_t adc1_fresh_phase_mask = 0U;
-/* 上层最近一次成功读取的 ADC1 完整三相组序号。 */
-static uint32_t adc1_last_read_sequence = 0U;
-
 /* ADC 底层初始化完成标志：1 表示已初始化，0 表示未初始化。 */
 static volatile uint8_t adc_initialized = 0U;
 /* 双 ADC 采集运行标志：1 表示正在采集，0 表示已停止。 */
@@ -157,6 +151,10 @@ void ADC_Start(void)
                              DMA_INT_FLAG_G);
 
     ADC_ResetRuntimeState();
+    adc_routine_channel_config(ADC1,
+                               0U,
+                               adc1_phase_channels[adc1_current_phase],
+                               ADC1_SAMPLE_TIME);
     ADC_EnableAndCalibrate();
 
     adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOC);
@@ -164,8 +162,6 @@ void ADC_Start(void)
     adc_external_trigger_config(ADC1, ADC_ROUTINE_CHANNEL, ENABLE);
 
     adc_dma_mode_enable(ADC0);
-    /* ADC1 虽无 DMA 映射，但扫描模式仍要求置位 DMA 位。 */
-    adc_dma_mode_enable(ADC1);
     dma_channel_enable(ADC0_DMA_PERIPH, ADC0_DMA_CHANNEL);
 
     adc_external_trigger_config(ADC0, ADC_ROUTINE_CHANNEL, ENABLE);
@@ -191,7 +187,6 @@ void ADC_Stop(void)
     adc_external_trigger_config(ADC0, ADC_ROUTINE_CHANNEL, DISABLE);
 
     adc_dma_mode_disable(ADC0);
-    adc_dma_mode_disable(ADC1);
     dma_channel_disable(ADC0_DMA_PERIPH, ADC0_DMA_CHANNEL);
 
     adc_disable(ADC0);
@@ -200,105 +195,67 @@ void ADC_Stop(void)
 }
 
 /*!
-    \brief      获取最新完整 ADC0 硬件过采样快照的只读地址
-    \param[out] snapshot: 当前完整快照的只读地址和发布序号
-    \retval     ADC_STATUS_OK: 成功
-    \retval     其他状态: 未初始化、数据未就绪、参数错误或 DMA 错误
+    \brief      复制最新完整 ADC0 硬件过采样 raw
+    \param[out] result: 输出电流、输出电压和输入电压 raw
+    \param[out] sequence: 当前完整数据的发布序号
+    \retval     1: 已复制有效数据
+    \retval     0: 参数无效或尚无完整数据
 */
-adc_status_t ADC0_GetLatestSnapshot(adc0_snapshot_view_t *snapshot)
+uint8_t ADC0_GetLatestRaw(adc0_frame_raw_t *result, uint32_t *sequence)
 {
-    uint32_t published_state;              /*!< 本次读取到的 ADC0 发布状态副本 */
-    uint32_t sequence;                     /*!< 从发布状态高31位提取的快照序号 */
-    uint8_t snapshot_index;                /*!< 从发布状态低1位提取的快照下标 */
+    uint32_t state_before;                 /*!< 复制 raw 前的 ADC0 发布状态 */
+    uint32_t state_after;                  /*!< 复制 raw 后的 ADC0 发布状态 */
+    uint32_t sequence_before;              /*!< 本次读取的完整数据序号 */
+    uint8_t snapshot_index;                /*!< 当前 ADC0 发布缓冲的数组下标 */
 
-    if (snapshot == NULL) {
-        return ADC_STATUS_INVALID_PARAMETER;
-    }
-    if (adc_initialized == 0U) {
-        return ADC_STATUS_NOT_INITIALIZED;
-    }
-    if (adc0_dma_error != 0U) {
-        return ADC_STATUS_DMA_ERROR;
-    }
-
-    published_state = adc0_published_state;
-    sequence = published_state >> 1U;
-    if (sequence == 0U) {
-        return ADC_STATUS_NOT_READY;
-    }
-
-    snapshot_index = (uint8_t)(published_state & 1U);
-    __DMB();
-    snapshot->frame = &adc0_snapshot_buffer[snapshot_index];
-    snapshot->sequence = sequence;
-    return ADC_STATUS_OK;
-}
-
-/*!
-    \brief      获取 ADC0 最近一次完整快照的发布序号
-    \param[in]  无
-    \param[out] 无
-    \retval     ADC0 快照发布序号，0 表示尚无有效快照
-*/
-uint32_t ADC0_GetSnapshotSequence(void)
-{
-    return adc0_published_state >> 1U;
-}
-
-/*!
-    \brief      读取 ADC1 最新完整的 A、B、C 三相 raw 数据
-    \param[out] result: 三相 raw 数据和对应发布序号
-    \param[out] new_data: 新三相组标志，1 表示有新数据，0 表示无
-    \retval     ADC_STATUS_OK: 成功
-    \retval     其他状态: 未初始化、数据未就绪或参数错误
-*/
-adc_status_t ADC1_GetLatestRaw(adc1_phase_raw_t *result,
-                               uint8_t *new_data)
-{
-    uint32_t state_before;                 /*!< 复制三相数据前读取的发布状态 */
-    uint32_t state_after;                  /*!< 复制三相数据后读取的发布状态 */
-    uint32_t sequence_before;              /*!< 本次读取的完整三相组序号 */
-    uint8_t published_index;               /*!< 当前 ADC1 发布缓冲的数组下标 */
-
-    if ((result == NULL) || (new_data == NULL)) {
-        return ADC_STATUS_INVALID_PARAMETER;
-    }
-    if (adc_initialized == 0U) {
-        return ADC_STATUS_NOT_INITIALIZED;
+    if ((result == NULL) || (sequence == NULL)) {
+        return 0U;
     }
 
     do {
-        state_before = adc1_published_state;
+        state_before = adc0_published_state;
         sequence_before = state_before >> 1U;
         if (sequence_before == 0U) {
-            *new_data = 0U;
-            return ADC_STATUS_NOT_READY;
+            return 0U;
         }
 
-        published_index = (uint8_t)(state_before & 1U);
+        snapshot_index = (uint8_t)(state_before & 1U);
         __DMB();
-        result->phase_a_raw = adc1_published_raw[published_index][0];
-        result->phase_b_raw = adc1_published_raw[published_index][1];
-        result->phase_c_raw = adc1_published_raw[published_index][2];
+        result->output_current_raw =
+            adc0_snapshot_buffer[snapshot_index].output_current_raw;
+        result->output_voltage_raw =
+            adc0_snapshot_buffer[snapshot_index].output_voltage_raw;
+        result->input_voltage_raw =
+            adc0_snapshot_buffer[snapshot_index].input_voltage_raw;
         __DMB();
-        state_after = adc1_published_state;
+        state_after = adc0_published_state;
     } while (state_before != state_after);
 
-    result->sequence = sequence_before;
-    *new_data = (sequence_before != adc1_last_read_sequence) ? 1U : 0U;
-    adc1_last_read_sequence = sequence_before;
-    return ADC_STATUS_OK;
+    *sequence = sequence_before;
+    return 1U;
 }
 
 /*!
-    \brief      获取 ADC1 最近一次完整三相组的发布序号
-    \param[in]  无
-    \param[out] 无
-    \retval     ADC1 三相组发布序号，0 表示尚无有效三相组
+    \brief      读取 ADC1 的 A、B、C 各相最新 raw 数据
+    \param[out] result: 三相各自最近一次转换的 raw 数据
+    \retval     1: 三相均至少完成过一次转换并已复制数据
+    \retval     0: 参数无效或任一相尚未完成转换
 */
-uint32_t ADC1_GetSequence(void)
+uint8_t ADC1_GetLatestRaw(adc1_phase_raw_t *result)
 {
-    return adc1_published_state >> 1U;
+    if (result == NULL) {
+        return 0U;
+    }
+
+    if (adc1_fresh_phase_mask != ADC1_ALL_PHASES_MASK) {
+        return 0U;
+    }
+
+    __DMB();
+    result->phase_a_raw = adc1_latest_raw[0];
+    result->phase_b_raw = adc1_latest_raw[1];
+    result->phase_c_raw = adc1_latest_raw[2];
+    return 1U;
 }
 
 /*!
@@ -349,7 +306,7 @@ static void ADC_DMA_Config(void)
 }
 
 /*!
-    \brief      配置 ADC0 连续扫描、硬件8倍过采样和 ADC1 间断采样
+    \brief      配置 ADC0 连续扫描、硬件8倍过采样和 ADC1 单通道轮转采样
     \param[in]  无
     \param[out] 无
     \retval     无
@@ -393,27 +350,21 @@ static void ADC_Peripheral_Config(void)
                                        ADC0_1_2_EXTTRIG_ROUTINE_NONE);
     adc_external_trigger_config(ADC0, ADC_ROUTINE_CHANNEL, DISABLE);
 
-    adc_special_function_config(ADC1, ADC_SCAN_MODE, ENABLE);
+    adc_special_function_config(ADC1, ADC_SCAN_MODE, DISABLE);
     adc_special_function_config(ADC1, ADC_CONTINUOUS_MODE, DISABLE);
     adc_data_alignment_config(ADC1, ADC_DATAALIGN_RIGHT);
     adc_resolution_config(ADC1, ADC_RESOLUTION_12B);
     adc_oversample_mode_disable(ADC1);
     adc_channel_length_config(ADC1,
                               ADC_ROUTINE_CHANNEL,
-                              ADC1_PHASE_CHANNEL_COUNT);
+                              1U);
     adc_routine_channel_config(ADC1,
                                0U,
-                               ADC1_PHASE_A_CHANNEL,
+                               adc1_phase_channels[0],
                                ADC1_SAMPLE_TIME);
-    adc_routine_channel_config(ADC1,
-                               1U,
-                               ADC1_PHASE_B_CHANNEL,
-                               ADC1_SAMPLE_TIME);
-    adc_routine_channel_config(ADC1,
-                               2U,
-                               ADC1_PHASE_C_CHANNEL,
-                               ADC1_SAMPLE_TIME);
-    adc_discontinuous_mode_config(ADC1, ADC_ROUTINE_CHANNEL, 1U);
+    adc_discontinuous_mode_config(ADC1,
+                                  ADC_CHANNEL_DISCON_DISABLE,
+                                  1U);
     adc_external_trigger_source_config(ADC1,
                                        ADC_ROUTINE_CHANNEL,
                                        ADC0_1_EXTTRIG_ROUTINE_T0_CH0);
@@ -445,7 +396,8 @@ static void ADC_TriggerTimer_Config(void)
     timer_init(ADC_TRIGGER_TIMER, &timer_init_struct);
 
     timer_channel_output_struct_para_init(&timer_oc_struct);
-    timer_oc_struct.outputstate = TIMER_CCX_DISABLE;
+    //硬件触发必须开启通道
+    timer_oc_struct.outputstate = TIMER_CCX_ENABLE;
     timer_oc_struct.outputnstate = TIMER_CCXN_DISABLE;
     timer_oc_struct.ocpolarity = TIMER_OC_POLARITY_HIGH;
     timer_oc_struct.ocnpolarity = TIMER_OCN_POLARITY_HIGH;
@@ -454,9 +406,10 @@ static void ADC_TriggerTimer_Config(void)
     timer_channel_output_config(ADC_TRIGGER_TIMER,
                                 TIMER_CH_0,
                                 &timer_oc_struct);
+                                //硬件触发必须是TIMER_OC_MODE_PWM1
     timer_channel_output_mode_config(ADC_TRIGGER_TIMER,
                                      TIMER_CH_0,
-                                     TIMER_OC_MODE_TIMING);
+                                     TIMER_OC_MODE_PWM1);
     timer_channel_output_shadow_config(ADC_TRIGGER_TIMER,
                                        TIMER_CH_0,
                                        TIMER_OC_SHADOW_DISABLE);
@@ -465,6 +418,9 @@ static void ADC_TriggerTimer_Config(void)
                                             ADC_TRIGGER_COMPARE_VALUE);
 
     timer_auto_reload_shadow_enable(ADC_TRIGGER_TIMER);
+    //必须开启输出模式
+    timer_primary_output_config(ADC_TRIGGER_TIMER, ENABLE);
+
     timer_input_trigger_source_select(ADC_TRIGGER_TIMER,
                                       TIMER_SMCFG_TRGSEL_ITI3);
     timer_slave_mode_select(ADC_TRIGGER_TIMER, TIMER_SLAVE_MODE_EVENT);
@@ -481,21 +437,14 @@ static void ADC_TriggerTimer_Config(void)
 */
 static void ADC_ResetRuntimeState(void)
 {
-    uint32_t buffer;                       /*!< ADC1 双发布缓冲循环下标 */
     uint32_t phase;                        /*!< ADC1 A/B/C 三相通道循环下标 */
 
     adc0_published_state = 0U;
-    adc0_dma_error = 0U;
 
-    adc1_next_phase = 0U;
+    adc1_current_phase = 0U;
     adc1_fresh_phase_mask = 0U;
-    adc1_published_state = 0U;
-    adc1_last_read_sequence = 0U;
     for (phase = 0U; phase < ADC1_PHASE_CHANNEL_COUNT; phase++) {
-        adc1_working_raw[phase] = 0U;
-        for (buffer = 0U; buffer < ADC1_PUBLISHED_BUFFER_COUNT; buffer++) {
-            adc1_published_raw[buffer][phase] = 0U;
-        }
+        adc1_latest_raw[phase] = 0U;
     }
 }
 
@@ -557,7 +506,6 @@ void ADC_DMA_IRQHandler_Internal(void)
         dma_interrupt_flag_clear(ADC0_DMA_PERIPH,
                                  ADC0_DMA_CHANNEL,
                                  DMA_INT_FLAG_ERR);
-        adc0_dma_error = 1U;
     }
 
     half_transfer_flag = dma_interrupt_flag_get(ADC0_DMA_PERIPH,
@@ -587,18 +535,16 @@ void ADC_DMA_IRQHandler_Internal(void)
 }
 
 /*!
-    \brief      处理 ADC1 单通道转换完成中断并发布完整三相组
+    \brief      处理 ADC1 单通道转换完成中断并更新对应相位最新值
     \param[in]  无
     \param[out] 无
     \retval     无
 */
 void ADC1_IRQHandler_Internal(void)
 {
-    uint32_t current_state;                /*!< 本次发布前的 ADC1 发布状态 */
-    uint32_t next_sequence;                /*!< 本次完整三相组的新发布序号 */
     uint16_t conversion_value;             /*!< 当前 EOC 对应的 ADC1 转换结果 */
-    uint8_t completed_phase;               /*!< 当前结果对应及下一次要处理的相位下标 */
-    uint8_t destination_buffer;            /*!< ADC1 目标发布缓冲数组下标 */
+    uint8_t completed_phase;               /*!< 当前结果对应的相位下标 */
+    uint8_t next_phase;                    /*!< 下一次触发需要转换的相位下标 */
 
     if (adc_interrupt_flag_get(ADC1, ADC_INT_FLAG_EOC) == RESET) {
         return;
@@ -607,25 +553,19 @@ void ADC1_IRQHandler_Internal(void)
     conversion_value = adc_routine_data_read(ADC1);
     adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOC);
 
-    completed_phase = adc1_next_phase;
-    adc1_working_raw[completed_phase] = conversion_value;
+    completed_phase = adc1_current_phase;
+    adc1_latest_raw[completed_phase] = conversion_value;
+    __DMB();
     adc1_fresh_phase_mask |= (uint8_t)(1U << completed_phase);
 
-    completed_phase++;
-    if (completed_phase >= ADC1_PHASE_CHANNEL_COUNT) {
-        completed_phase = 0U;
-        if (adc1_fresh_phase_mask == ADC1_ALL_PHASES_MASK) {
-            current_state = adc1_published_state;
-            destination_buffer = (uint8_t)((current_state & 1U) ^ 1U);
-            adc1_published_raw[destination_buffer][0] = adc1_working_raw[0];
-            adc1_published_raw[destination_buffer][1] = adc1_working_raw[1];
-            adc1_published_raw[destination_buffer][2] = adc1_working_raw[2];
-            adc1_fresh_phase_mask = 0U;
-            __DMB();
-            next_sequence = (current_state >> 1U) + 1U;
-            adc1_published_state = (next_sequence << 1U) |
-                                   destination_buffer;
-        }
+    next_phase = (uint8_t)(completed_phase + 1U);
+    if (next_phase >= ADC1_PHASE_CHANNEL_COUNT) {
+        next_phase = 0U;
     }
-    adc1_next_phase = completed_phase;
+
+    adc_routine_channel_config(ADC1,
+                               0U,
+                               adc1_phase_channels[next_phase],
+                               ADC1_SAMPLE_TIME);
+    adc1_current_phase = next_phase;
 }

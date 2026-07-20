@@ -68,6 +68,7 @@ void BoostControl_Init(void)
     if (timer_initialized != 0U) {
         ControlTimer_Start();
     }
+		//DutyControl_Start();
 }
 
 /*!
@@ -243,13 +244,9 @@ static void BoostControl_UpdateAdcData(void)
 {
     adc_monitor_value_t monitor_value = {0};   /*!< ADC0 输出监测实际值。 */
     adc_phase_current_value_t phase_value = {0}; /*!< ADC1 三相电流实际值。 */
-    uint8_t monitor_new_data = 0U;             /*!< ADC0 接口要求的新快照标志。 */
-    uint8_t phase_new_data = 0U;               /*!< ADC1 接口要求的新三相组标志。 */
 
-    (void)ADCMeasurement_ProcessMonitor(&monitor_value,
-                                        &monitor_new_data);
-    (void)ADCMeasurement_GetPhaseCurrents(&phase_value,
-                                          &phase_new_data);
+    ADCMeasurement_ProcessMonitor(&monitor_value);
+    ADCMeasurement_GetPhaseCurrents(&phase_value);
 
     boost_control.adc.output_voltage_v = monitor_value.output_voltage_v;
     boost_control.adc.output_current_a = monitor_value.output_current_a;
@@ -382,6 +379,7 @@ static void BoostControl_ExecuteState(void)
 
     case BOOST_STATE_FAULT:
     default:
+        BoostControl_ClearDutyData();
         if (boost_control.pwm_running != 0U) {
             DutyControl_SetThreePhaseDuty(0.0f, 0.0f, 0.0f);
             DutyControl_Stop();

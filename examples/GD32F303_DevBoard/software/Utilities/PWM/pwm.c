@@ -281,6 +281,7 @@ static void PWM_GPIO_ConfigureSafeLow(void)
 static void PWM_GPIO_ConfigureAlternateFunction(void)
 {
     /* 释放 PA15/PB3/PB4 的 JTAG 功能，同时保留 PA13/PA14 的 SWD。 */
+    //这个debug时必须注释
     gpio_pin_remap_config(GPIO_SWJ_SWDPENABLE_REMAP, ENABLE);
     gpio_pin_remap_config(GPIO_TIMER1_FULL_REMAP, ENABLE);
     gpio_pin_remap_config(GPIO_TIMER2_PARTIAL_REMAP, ENABLE);

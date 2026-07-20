@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 板载调试串口由占用 ADC 管脚 PA2/PA3 的 USART1 迁移至 PA9/PA10 的 USART0，并将 `printf` 重定向到中断发送缓冲
 - Keil 工程启用 AC5 MicroLIB，与 EIDE 工程配置保持一致
 - `main.c` 删除状态复制、周期判断和文本格式化实现，只保留 `AppBoostMonitor_Init/Task` 上层 API 调用
+- ADC1 改为单通道规则序列，在每次 EOC 中断中保存当前相最新 raw 并将 Rank0 切换到下一相；同时移除三相双发布缓冲、采样序号和新数据判断，读取接口直接返回 A/B/C 各相最近值
 
 ## [0.5.0] - 2026-07-14
 

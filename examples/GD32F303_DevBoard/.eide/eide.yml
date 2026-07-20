@@ -10,7 +10,6 @@ virtualFolder:
   folders:
     - name: Application
       files:
-        - path: software/Application/Source/app_boost_monitor.c
         - path: software/Application/Source/app_key.c
         - path: software/Application/Source/gd32f30x_it.c
         - path: software/Application/Source/main.c
