@@ -20,7 +20,9 @@ typedef enum {
 /*! \brief Boost 软件故障标志位。 */
 typedef enum {
     BOOST_FAULT_NONE = 0x00000000U,             /*!< 当前没有锁存故障。 */
-    BOOST_FAULT_OUTPUT_OVERVOLTAGE = 0x00000001U /*!< Boost 输出过压故障。 */
+    BOOST_FAULT_OUTPUT_OVERVOLTAGE = 0x00000001U, /*!< Boost 输出过压故障。 */
+    BOOST_FAULT_ADC_PHASE_CALIBRATION = 0x00000002U, /*!< ADC1 三相偏置校准故障。 */
+    BOOST_FAULT_OUTPUT_OPEN = 0x00000004U        /*!< Boost 输出开路故障。 */
 } boost_fault_flag_t;
 
 /*! \brief Boost 控制使用的 ADC 实际值。 */

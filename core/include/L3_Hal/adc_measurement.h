@@ -18,6 +18,27 @@ typedef struct {
     float phase_c_current_a;               /*!< C 相电流，单位 A */
 } adc_phase_current_value_t;
 
+typedef struct {
+    uint16_t phase_a_offset_raw;            /*!< A 相零电流偏置 raw */
+    uint16_t phase_b_offset_raw;            /*!< B 相零电流偏置 raw */
+    uint16_t phase_c_offset_raw;            /*!< C 相零电流偏置 raw */
+} adc_phase_offset_value_t;
+
+/*!
+    \brief      使用独立 ADC1 轮询流程校准三相零电流偏置
+    \param[in]  无
+    \param[out] 无
+    \retval     1: 三相偏置已校准并保存
+    \retval     0: 校准失败，偏置保持无效
+*/
+uint8_t ADCMeasurement_CalibratePhaseOffsets(void);
+
+/* 返回三相偏置是否已经成功校准。 */
+uint8_t ADCMeasurement_IsPhaseOffsetReady(void);
+
+/* 复制已校准的三相偏置 raw；成功返回1，未校准或参数为空返回0。 */
+uint8_t ADCMeasurement_GetPhaseOffsets(adc_phase_offset_value_t *result);
+
 /*!
     \brief      初始化 ADC 实际值测量模块及底层双 ADC 采集通路
     \param[in]  无

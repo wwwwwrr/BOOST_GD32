@@ -4,6 +4,7 @@
 */
 
 #include "app_boost_monitor.h"
+#include "adc_measurement.h"
 #include "boost_control.h"
 #include "project_config.h"
 #include "systick.h"
@@ -15,6 +16,7 @@ static uint8_t boost_monitor_initialized;      /*!< 状态监视模块初始化�
 
 static const char *AppBoostMonitor_StateToString(boost_system_state_t state);
 static const char *AppBoostMonitor_ModeToString(boost_power_mode_t mode);
+static void AppBoostMonitor_PrintPhaseOffsets(void);
 static void AppBoostMonitor_Print(const boost_control_context_t *context);
 
 /*!
@@ -31,6 +33,41 @@ void AppBoostMonitor_Init(void)
 
     printf("\r\n=== Boost 10 kHz Control Ready ===\r\n");
     printf("KEY1: SHUTOFF Toggle, KEY2: Start, KEY3: Stop, KEY4: ClearFault.\r\n");
+    AppBoostMonitor_PrintPhaseOffsets();
+}
+
+/*!
+    \brief      在串口初始化后打印一次 ADC1 三相上电校准偏置
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+static void AppBoostMonitor_PrintPhaseOffsets(void)
+{
+    adc_phase_offset_value_t offset;        /*!< L3 保存的三相偏置 raw */
+    float phase_a_offset_v;                 /*!< A 相偏置电压 */
+    float phase_b_offset_v;                 /*!< B 相偏置电压 */
+    float phase_c_offset_v;                 /*!< C 相偏置电压 */
+
+    if (ADCMeasurement_GetPhaseOffsets(&offset) == 0U) {
+        printf("adc_phase_offset=INVALID\r\n");
+        return;
+    }
+
+    phase_a_offset_v = ((float)offset.phase_a_offset_raw *
+                        BSP_ADC_REF_VOLTAGE) / BSP_ADC_FULL_SCALE;
+    phase_b_offset_v = ((float)offset.phase_b_offset_raw *
+                        BSP_ADC_REF_VOLTAGE) / BSP_ADC_FULL_SCALE;
+    phase_c_offset_v = ((float)offset.phase_c_offset_raw *
+                        BSP_ADC_REF_VOLTAGE) / BSP_ADC_FULL_SCALE;
+
+    printf("adc_phase_offset={a=%u(%.3fV),b=%u(%.3fV),c=%u(%.3fV)}\r\n",
+           (unsigned int)offset.phase_a_offset_raw,
+           phase_a_offset_v,
+           (unsigned int)offset.phase_b_offset_raw,
+           phase_b_offset_v,
+           (unsigned int)offset.phase_c_offset_raw,
+           phase_c_offset_v);
 }
 
 /*!

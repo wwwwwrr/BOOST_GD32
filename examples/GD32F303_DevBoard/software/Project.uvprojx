@@ -449,6 +449,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\core\src\L3_Hal\control_timer.c</FilePath>
             </File>
+            <File>
+              <FileName>status_indicator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\core\src\L3_Hal\status_indicator.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

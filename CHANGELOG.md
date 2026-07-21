@@ -9,12 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 新增
 - 新增 `BoostControl_GetContext()` 上下文复制接口，以及 Application 层 `AppBoostMonitor_Init/Task` 状态监视 API，通过 USART0 每 200 ms 打印 Boost 状态、模式、故障、ADC 实际值和三相占空比
+- 新增 Boost 初始化前置 ADC1 三相零电流偏置校准，使用独立软件触发轮询流程对 A/B/C 每相 64 个样本求平均，校准后反初始化 ADC1，并在串口初始化时打印一次三相 raw 和偏置电压
+- 新增 ADC1 三相偏置校准故障锁存，校准失败时禁止 PWM 启动
+- 新增 Boost 静态开路与运行中断开保护：18 V 后以 50 mA 空载阈值确认静态开路，并在曾检测到 200 mA 负载后以 0.5 ms 快速确认运行中断开；两类场景统一锁存输出开路故障并停止三相 PWM
+- 新增 L3 RGB 状态指示接口，Boost 空闲时熄灭 LED3，软启动、运行和故障状态分别显示蓝色、绿色和红色
 
 ### 变更
 - 板载调试串口由占用 ADC 管脚 PA2/PA3 的 USART1 迁移至 PA9/PA10 的 USART0，并将 `printf` 重定向到中断发送缓冲
 - Keil 工程启用 AC5 MicroLIB，与 EIDE 工程配置保持一致
 - `main.c` 删除状态复制、周期判断和文本格式化实现，只保留 `AppBoostMonitor_Init/Task` 上层 API 调用
 - ADC1 改为单通道规则序列，在每次 EOC 中断中保存当前相最新 raw 并将 Rank0 切换到下一相；同时移除三相双发布缓冲、采样序号和新数据判断，读取接口直接返回 A/B/C 各相最近值
+- 相电流换算由三相共用固定 1.1 V 偏置改为分别使用上电校准得到的 A/B/C 偏置 raw
+- 输出开路判断的电压、电流和毫秒参数集中到 LS 配置层，并根据 10 kHz 控制频率自动换算确认周期；故障路径在 PI 计算前执行并于同一控制中断内停止 PWM
+- LED 驱动删除占用 PWM 引脚的 PB3/PB4/PB5 旧映射及数字式控制接口，按最新版原理图改为 PC13/PC14/PC15 共地 RGB LED3 互斥颜色控制
 
 ## [0.5.0] - 2026-07-14
 

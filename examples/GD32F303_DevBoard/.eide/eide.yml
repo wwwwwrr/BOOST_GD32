@@ -28,6 +28,7 @@ virtualFolder:
         - path: ../../core/src/L3_Hal/adc_measurement.c
         - path: ../../core/src/L3_Hal/control_timer.c
         - path: ../../core/src/L3_Hal/duty_control.c
+        - path: ../../core/src/L3_Hal/status_indicator.c
       folders: []
     - name: CMSIS
       files:

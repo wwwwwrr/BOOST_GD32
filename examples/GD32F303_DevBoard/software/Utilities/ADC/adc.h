@@ -36,6 +36,9 @@ void ADC_Start(void);
 /* 停止两路 ADC 采集及 TIMER0。 */
 void ADC_Stop(void);
 
+/* 使用独立的 ADC1 软件轮询流程测量三相零电流偏置，并在返回前反初始化 ADC1。 */
+uint8_t ADC1_CalibratePhaseOffsets(adc1_phase_raw_t *result);
+
 /*!
     \brief      复制最新完整 ADC0 硬件过采样 raw
     \param[out] result: 输出电流、输出电压和输入电压 raw

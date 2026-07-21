@@ -4,6 +4,7 @@
 #include "control_timer.h"
 #include "adc_measurement.h"
 #include "duty_control.h"
+#include "status_indicator.h"
 
 static volatile boost_control_context_t boost_control; /*!< 中断写入、线程读取的 Boost 共享运行上下文。 */
 static incremental_pi_t boost_voltage_pi; /*!< 仅由 10 kHz 控制任务操作的电压环 PI 实例。 */
@@ -11,14 +12,19 @@ static incremental_pi_t boost_current_pi; /*!< 仅由 10 kHz 控制任务操作�
 static volatile uint8_t boost_start_command = 0U; /*!< START 待处理标志：1 待处理。 */
 static volatile uint8_t boost_stop_command = 0U; /*!< STOP 待处理标志：1 待处理。 */
 static volatile uint8_t boost_clear_fault_command = 0U; /*!< CLEAR_FAULT 待处理标志：1 待处理。 */
+static uint16_t boost_open_load_count = 0U; /*!< 输出低电流连续控制周期计数。 */
+static uint8_t boost_load_detected = 0U; /*!< 本次运行是否曾检测到有效负载：1 是。 */
 
 static void BoostControl_ClearDutyData(void);
+static void BoostControl_ResetOpenLoadDetection(void);
 static void BoostControl_ResetRuntimeData(void);
 static void BoostControl_HandleCommand(void);
 static void BoostControl_UpdateAdcData(void);
+static void BoostControl_CheckOpenLoad(void);
 static void BoostControl_CheckProtection(void);
 static void BoostControl_UpdateSoftStart(void);
 static void BoostControl_UpdatePowerLoop(void);
+static void BoostControl_ExecuteActiveOutput(void);
 static void BoostControl_ExecuteState(void);
 
 /*!
@@ -30,14 +36,23 @@ static void BoostControl_ExecuteState(void);
 void BoostControl_Init(void)
 {
     uint8_t timer_initialized;      /*!< 10 kHz 控制定时器初始化结果：1 成功。 */
+    uint8_t phase_offset_ready;     /*!< ADC1 三相偏置校准结果：1 成功。 */
 
     boost_start_command = 0U;
     boost_stop_command = 0U;
     boost_clear_fault_command = 0U;
+    BoostControl_ResetOpenLoadDetection();
+    StatusIndicator_Init();
 
-    boost_control.state = BOOST_STATE_IDLE;
+    phase_offset_ready = ADCMeasurement_CalibratePhaseOffsets();
+
+    boost_control.state = (phase_offset_ready != 0U) ?
+                          BOOST_STATE_IDLE : BOOST_STATE_FAULT;
     boost_control.mode = BOOST_POWER_MODE_CV;
-    boost_control.fault_flags = BOOST_FAULT_NONE;
+    boost_control.fault_flags = (phase_offset_ready != 0U) ?
+                                BOOST_FAULT_NONE :
+                                BOOST_FAULT_ADC_PHASE_CALIBRATION;
+
     boost_control.adc.output_voltage_v = 0.0f;
     boost_control.adc.output_current_a = 0.0f;
     boost_control.adc.input_voltage_v = 0.0f;
@@ -150,7 +165,6 @@ void BoostControl_10kHzHandler(void)
     BoostControl_HandleCommand();
     BoostControl_UpdateAdcData();
     BoostControl_CheckProtection();
-
     if (boost_control.state == BOOST_STATE_SOFT_START) {
         BoostControl_UpdateSoftStart();
     }
@@ -179,6 +193,18 @@ static void BoostControl_ClearDutyData(void)
 }
 
 /*!
+    \brief      清除输出开路检测的负载历史和连续计数
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+static void BoostControl_ResetOpenLoadDetection(void)
+{
+    boost_open_load_count = 0U;
+    boost_load_detected = 0U;
+}
+
+/*!
     \brief      重新初始化 PI、软启动目标、占空比和运行模式
     \param[in]  无
     \param[out] 无
@@ -189,6 +215,7 @@ static void BoostControl_ResetRuntimeData(void)
 {
     IncrementalPI_Reset(&boost_voltage_pi);
     IncrementalPI_Reset(&boost_current_pi);
+    BoostControl_ResetOpenLoadDetection();
     boost_control.voltage_reference_v = BOOST_SOFT_START_INITIAL_VOLTAGE_V;
     boost_control.mode = BOOST_POWER_MODE_CV;
     BoostControl_ClearDutyData();
@@ -257,17 +284,73 @@ static void BoostControl_UpdateAdcData(void)
 }
 
 /*!
-    \brief      检查首版 Boost 输出过压软件保护
+    \brief      检查静态开路和运行中断开
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+    \note       静态开路使用较长确认时间，检测到负载后改用快速确认时间
+*/
+static void BoostControl_CheckOpenLoad(void)
+{
+    uint16_t confirm_cycles; /*!< 当前场景要求的低电流连续控制周期数。 */
+
+    if ((boost_control.state != BOOST_STATE_SOFT_START) &&
+        (boost_control.state != BOOST_STATE_RUN)) {
+        boost_open_load_count = 0U;
+        return;
+    }
+
+    if (boost_control.adc.output_current_a >=
+        BOOST_LOAD_PRESENT_CURRENT_THRESHOLD_A) {
+        boost_load_detected = 1U;
+        boost_open_load_count = 0U;
+        return;
+    }
+
+    if (boost_control.adc.output_current_a >=
+        BOOST_OPEN_LOAD_CURRENT_THRESHOLD_A) {
+        boost_open_load_count = 0U;
+        return;
+    }
+
+    if ((boost_load_detected == 0U) &&
+        (boost_control.adc.output_voltage_v <
+         BOOST_STATIC_OPEN_ARM_VOLTAGE_V)) {
+        boost_open_load_count = 0U;
+        return;
+    }
+
+    confirm_cycles = (boost_load_detected != 0U) ?
+                     BOOST_RUNTIME_OPEN_CONFIRM_CYCLES :
+                     BOOST_STATIC_OPEN_CONFIRM_CYCLES;
+
+    if (boost_open_load_count < confirm_cycles) {
+        boost_open_load_count++;
+    }
+
+    if (boost_open_load_count >= confirm_cycles) {
+        boost_control.fault_flags |= BOOST_FAULT_OUTPUT_OPEN;
+    }
+}
+
+/*!
+    \brief      检查 Boost ADC 校准、输出过压和输出开路软件保护
     \param[in]  无
     \param[out] 无
     \retval     无
 */
 static void BoostControl_CheckProtection(void)
 {
+    if (ADCMeasurement_IsPhaseOffsetReady() == 0U) {
+        boost_control.fault_flags |= BOOST_FAULT_ADC_PHASE_CALIBRATION;
+    }
+
     if (boost_control.adc.output_voltage_v >
         BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V) {
         boost_control.fault_flags |= BOOST_FAULT_OUTPUT_OVERVOLTAGE;
     }
+
+    BoostControl_CheckOpenLoad();
 
     if (boost_control.fault_flags != BOOST_FAULT_NONE) {
         boost_control.state = BOOST_STATE_FAULT;
@@ -348,7 +431,27 @@ static void BoostControl_UpdatePowerLoop(void)
 }
 
 /*!
-    \brief      根据最终系统状态执行 PWM 启停和占空比写入
+    \brief      启动活动状态 PWM 并写入当前三相占空比
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+static void BoostControl_ExecuteActiveOutput(void)
+{
+    if (boost_control.pwm_running == 0U) {
+        DutyControl_SetThreePhaseDuty(0.0f, 0.0f, 0.0f);
+        DutyControl_Start();
+        boost_control.pwm_running = 1U;
+    }
+
+    DutyControl_SetThreePhaseDuty(
+        boost_control.duty_phase_a_percent,
+        boost_control.duty_phase_b_percent,
+        boost_control.duty_phase_c_percent);
+}
+
+/*!
+    \brief      根据最终系统状态执行 PWM 和 RGB 状态指示
     \param[in]  无
     \param[out] 无
     \retval     无
@@ -362,19 +465,17 @@ static void BoostControl_ExecuteState(void)
             DutyControl_Stop();
             boost_control.pwm_running = 0U;
         }
+        StatusIndicator_SetColor(STATUS_INDICATOR_OFF);
         break;
 
     case BOOST_STATE_SOFT_START:
+        BoostControl_ExecuteActiveOutput();
+        StatusIndicator_SetColor(STATUS_INDICATOR_BLUE);
+        break;
+
     case BOOST_STATE_RUN:
-        if (boost_control.pwm_running == 0U) {
-            DutyControl_SetThreePhaseDuty(0.0f, 0.0f, 0.0f);
-            DutyControl_Start();
-            boost_control.pwm_running = 1U;
-        }
-        DutyControl_SetThreePhaseDuty(
-            boost_control.duty_phase_a_percent,
-            boost_control.duty_phase_b_percent,
-            boost_control.duty_phase_c_percent);
+        BoostControl_ExecuteActiveOutput();
+        StatusIndicator_SetColor(STATUS_INDICATOR_GREEN);
         break;
 
     case BOOST_STATE_FAULT:
@@ -385,6 +486,7 @@ static void BoostControl_ExecuteState(void)
             DutyControl_Stop();
             boost_control.pwm_running = 0U;
         }
+        StatusIndicator_SetColor(STATUS_INDICATOR_RED);
         break;
     }
 }

@@ -7,6 +7,7 @@
 
 #include "adc.h"
 #include "interrupt_priority.h"
+#include "project_config.h"
 #include "systick.h"
 #include <stddef.h>
 
@@ -34,6 +35,18 @@
 #define ADC1_SAMPLE_TIME                  ADC_SAMPLETIME_7POINT5
 #define ADC1_ALL_PHASES_MASK              0x07U
 
+#if (BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS == 0U)
+#error "ADC1 phase-offset sample rounds must be greater than zero"
+#endif
+
+#if (BSP_ADC_PHASE_OFFSET_TIMEOUT_MS == 0U)
+#error "ADC1 phase-offset conversion timeout must be greater than zero"
+#endif
+
+#if (BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS > 1048832U)
+#error "ADC1 phase-offset accumulator would overflow uint32_t"
+#endif
+
 #define ADC_TRIGGER_TIMER                 TIMER0
 #define ADC_TRIGGER_TIMER_RCU             RCU_TIMER0
 #define ADC_TRIGGER_TIMER_CLOCK_HZ        120000000U
@@ -42,7 +55,7 @@
 #define ADC_TRIGGER_PERIOD_COUNTS         (ADC_TRIGGER_TIMER_CLOCK_HZ / \
                                            ADC_TRIGGER_FREQUENCY_HZ)
 #define ADC_TRIGGER_TIMER_PERIOD          (ADC_TRIGGER_PERIOD_COUNTS - 1U)
-#define ADC_TRIGGER_COMPARE_VALUE         300U
+#define ADC_TRIGGER_COMPARE_VALUE         380U
 
 #if ((ADC0_DMA_FRAME_COUNT % 2U) != 0U)
 #error "ADC0 DMA frame count must be even"
@@ -96,6 +109,11 @@ static void ADC_TriggerTimer_Config(void);
 static void ADC_ResetRuntimeState(void);
 static void ADC_EnableAndCalibrate(void);
 static void ADC0_CopyCompletedFrame(uint32_t source_frame_offset);
+static uint8_t ADC1_OffsetCalibration_Init(void);
+static void ADC1_OffsetCalibration_DeInit(void);
+static uint8_t ADC1_OffsetCalibration_WaitControlBitClear(uint32_t bit);
+static uint8_t ADC1_OffsetCalibration_Read(uint8_t channel,
+                                           uint16_t *result);
 
 /*!
     \brief      初始化 ADC0、ADC1、DMA 和 ADC1 触发定时器
@@ -195,6 +213,65 @@ void ADC_Stop(void)
 }
 
 /*!
+    \brief      独立初始化 ADC1 并以轮询方式测量 A/B/C 三相零电流偏置
+    \param[out] result: 三相偏置平均 raw
+    \retval     1: 三相偏置测量完成
+    \retval     0: 参数无效或任一次转换超时
+    \note       本流程不配置中断、DMA 和触发定时器，退出前始终反初始化 ADC1
+*/
+uint8_t ADC1_CalibratePhaseOffsets(adc1_phase_raw_t *result)
+{
+    uint32_t phase_sum[ADC1_PHASE_CHANNEL_COUNT] = {0U};
+    uint32_t round;                        /*!< 当前校准轮次 */
+    uint32_t phase;                        /*!< 当前校准相位下标 */
+    uint16_t conversion_value;             /*!< 当前软件触发转换 raw */
+    adc1_phase_raw_t calibrated_offset;    /*!< 三相全部完成后的待提交偏置 */
+    uint8_t calibration_ok = 0U;           /*!< 三相校准成功标志 */
+
+    if (result == NULL) {
+        return 0U;
+    }
+
+    if (ADC1_OffsetCalibration_Init() == 0U) {
+        goto calibration_cleanup;
+    }
+
+    for (round = 0U;
+         round < (BSP_ADC_PHASE_OFFSET_DISCARD_ROUNDS +
+                  BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS);
+         round++) {
+        for (phase = 0U; phase < ADC1_PHASE_CHANNEL_COUNT; phase++) {
+            if (ADC1_OffsetCalibration_Read(adc1_phase_channels[phase],
+                                            &conversion_value) == 0U) {
+                goto calibration_cleanup;
+            }
+
+            if (round >= BSP_ADC_PHASE_OFFSET_DISCARD_ROUNDS) {
+                phase_sum[phase] += conversion_value;
+            }
+        }
+    }
+
+    calibrated_offset.phase_a_raw = (uint16_t)(
+        (phase_sum[0] + (BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS / 2U)) /
+        BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS);
+    calibrated_offset.phase_b_raw = (uint16_t)(
+        (phase_sum[1] + (BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS / 2U)) /
+        BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS);
+    calibrated_offset.phase_c_raw = (uint16_t)(
+        (phase_sum[2] + (BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS / 2U)) /
+        BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS);
+    calibration_ok = 1U;
+
+calibration_cleanup:
+    ADC1_OffsetCalibration_DeInit();
+    if (calibration_ok != 0U) {
+        *result = calibrated_offset;
+    }
+    return calibration_ok;
+}
+
+/*!
     \brief      复制最新完整 ADC0 硬件过采样 raw
     \param[out] result: 输出电流、输出电压和输入电压 raw
     \param[out] sequence: 当前完整数据的发布序号
@@ -247,9 +324,9 @@ uint8_t ADC1_GetLatestRaw(adc1_phase_raw_t *result)
         return 0U;
     }
 
-    if (adc1_fresh_phase_mask != ADC1_ALL_PHASES_MASK) {
-        return 0U;
-    }
+    // if (adc1_fresh_phase_mask != ADC1_ALL_PHASES_MASK) {
+    //     return 0U;
+    // }
 
     __DMB();
     result->phase_a_raw = adc1_latest_raw[0];
@@ -461,6 +538,129 @@ static void ADC_EnableAndCalibrate(void)
     delay_1ms(1U);
     adc_calibration_enable(ADC0);
     adc_calibration_enable(ADC1);
+}
+
+/*!
+    \brief      临时配置 ADC1 为单通道软件触发轮询采样
+    \param[in]  无
+    \param[out] 无
+    \retval     1: ADC1 自校准完成
+    \retval     0: ADC1 自校准超时
+*/
+static uint8_t ADC1_OffsetCalibration_Init(void)
+{
+    rcu_periph_clock_enable(RCU_GPIOA);
+    gpio_init(GPIOA,
+              GPIO_MODE_AIN,
+              GPIO_OSPEED_50MHZ,
+              GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2);
+
+    rcu_periph_clock_enable(RCU_ADC1);
+    rcu_adc_clock_config(ADC_CLOCK_PRESCALER);
+    adc_deinit(ADC1);
+
+    adc_special_function_config(ADC1, ADC_SCAN_MODE, DISABLE);
+    adc_special_function_config(ADC1, ADC_CONTINUOUS_MODE, DISABLE);
+    adc_data_alignment_config(ADC1, ADC_DATAALIGN_RIGHT);
+    adc_resolution_config(ADC1, ADC_RESOLUTION_12B);
+    adc_oversample_mode_disable(ADC1);
+    adc_channel_length_config(ADC1, ADC_ROUTINE_CHANNEL, 1U);
+    adc_routine_channel_config(ADC1,
+                               0U,
+                               ADC1_PHASE_A_CHANNEL,
+                               ADC1_SAMPLE_TIME);
+    adc_external_trigger_source_config(ADC1,
+                                       ADC_ROUTINE_CHANNEL,
+                                       ADC0_1_2_EXTTRIG_ROUTINE_NONE);
+    adc_external_trigger_config(ADC1, ADC_ROUTINE_CHANNEL, ENABLE);
+    adc_interrupt_disable(ADC1, ADC_INT_EOC);
+    adc_flag_clear(ADC1, ADC_FLAG_EOC | ADC_FLAG_STRC);
+
+    adc_enable(ADC1);
+    delay_1ms(1U);
+
+    ADC_CTL1(ADC1) |= ADC_CTL1_RSTCLB;
+    if (ADC1_OffsetCalibration_WaitControlBitClear(ADC_CTL1_RSTCLB) == 0U) {
+        return 0U;
+    }
+
+    ADC_CTL1(ADC1) |= ADC_CTL1_CLB;
+    if (ADC1_OffsetCalibration_WaitControlBitClear(ADC_CTL1_CLB) == 0U) {
+        return 0U;
+    }
+
+    return 1U;
+}
+
+/*!
+    \brief      清理临时 ADC1 偏置校准硬件状态
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+static void ADC1_OffsetCalibration_DeInit(void)
+{
+    adc_external_trigger_config(ADC1, ADC_ROUTINE_CHANNEL, DISABLE);
+    adc_interrupt_disable(ADC1, ADC_INT_EOC);
+    adc_flag_clear(ADC1, ADC_FLAG_EOC | ADC_FLAG_STRC);
+    adc_disable(ADC1);
+    adc_deinit(ADC1);
+    rcu_periph_clock_disable(RCU_ADC1);
+}
+
+/*!
+    \brief      带超时等待 ADC1 自校准控制位由硬件清零
+    \param[in]  bit: ADC_CTL1_RSTCLB 或 ADC_CTL1_CLB
+    \param[out] 无
+    \retval     1: 控制位已清零
+    \retval     0: 等待超时
+*/
+static uint8_t ADC1_OffsetCalibration_WaitControlBitClear(uint32_t bit)
+{
+    uint32_t start_tick;                   /*!< 等待开始时的毫秒时基 */
+
+    start_tick = systick_get_tick();
+    while ((ADC_CTL1(ADC1) & bit) != 0U) {
+        if ((uint32_t)(systick_get_tick() - start_tick) >=
+            BSP_ADC_PHASE_OFFSET_TIMEOUT_MS) {
+            return 0U;
+        }
+    }
+
+    return 1U;
+}
+
+/*!
+    \brief      软件触发并轮询读取一个 ADC1 相电流通道
+    \param[in]  channel: ADC_CHANNEL_0、ADC_CHANNEL_1 或 ADC_CHANNEL_2
+    \param[out] result: 转换完成后的12位 raw
+    \retval     1: 转换完成
+    \retval     0: 参数无效或等待 EOC 超时
+*/
+static uint8_t ADC1_OffsetCalibration_Read(uint8_t channel,
+                                           uint16_t *result)
+{
+    uint32_t start_tick;                   /*!< 当前转换开始时的毫秒时基 */
+
+    if (result == NULL) {
+        return 0U;
+    }
+
+    adc_routine_channel_config(ADC1, 0U, channel, ADC1_SAMPLE_TIME);
+    adc_flag_clear(ADC1, ADC_FLAG_EOC | ADC_FLAG_STRC);
+    start_tick = systick_get_tick();
+    adc_software_trigger_enable(ADC1, ADC_ROUTINE_CHANNEL);
+
+    while (adc_flag_get(ADC1, ADC_FLAG_EOC) == RESET) {
+        if ((uint32_t)(systick_get_tick() - start_tick) >=
+            BSP_ADC_PHASE_OFFSET_TIMEOUT_MS) {
+            return 0U;
+        }
+    }
+
+    *result = adc_routine_data_read(ADC1);
+    adc_flag_clear(ADC1, ADC_FLAG_EOC | ADC_FLAG_STRC);
+    return 1U;
 }
 
 /*!
