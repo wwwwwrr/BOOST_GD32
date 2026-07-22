@@ -1,6 +1,6 @@
 /*!
     \file    app_boost_monitor.c
-    \brief   编排 Boost 上下文复制、文本格式化与 USART0 调试输出
+    \brief   编排 Boost 串口命令接收、上下文复制与 USART0 调试输出
 */
 
 #include "app_boost_monitor.h"
@@ -16,11 +16,12 @@ static uint8_t boost_monitor_initialized;      /*!< 状态监视模块初始化�
 
 static const char *AppBoostMonitor_StateToString(boost_system_state_t state);
 static const char *AppBoostMonitor_ModeToString(boost_power_mode_t mode);
+static void AppBoostMonitor_RxCallback(const uint8_t *data, uint16_t length);
 static void AppBoostMonitor_PrintPhaseOffsets(void);
 static void AppBoostMonitor_Print(const boost_control_context_t *context);
 
 /*!
-    \brief      初始化 USART0 与 Boost 状态监视任务
+    \brief      初始化 USART0 与 Boost 状态监视、命令接收任务
     \param[in]  无
     \param[out] 无
     \retval     无
@@ -28,12 +29,42 @@ static void AppBoostMonitor_Print(const boost_control_context_t *context);
 void AppBoostMonitor_Init(void)
 {
     USART0_Init();
+    USART0_SetRxCallback(AppBoostMonitor_RxCallback);
     boost_monitor_last_print_tick = systick_get_tick();
     boost_monitor_initialized = 1U;
 
     printf("\r\n=== Boost 10 kHz Control Ready ===\r\n");
-    printf("KEY1: SHUTOFF Toggle, KEY2: Start, KEY3: Stop, KEY4: ClearFault.\r\n");
+    printf("KEY1: SHUTOFF Toggle, KEY2: Start, KEY3: Voltage +0.1V, KEY4: Voltage -0.1V.\r\n");
+    printf("USART0: + Current +10mA, - Current -10mA.\r\n");
     AppBoostMonitor_PrintPhaseOffsets();
+}
+
+/*!
+    \brief      在 USART0 IDLE 中断中解析首个有效电流目标调整命令
+    \param[in]  data: DMA 接收批次缓冲区
+    \param[in]  length: DMA 接收批次有效字节数
+    \param[out] 无
+    \retval     无
+    \note       每批只处理首个 + 或 -；禁止阻塞、打印或执行浮点运算
+*/
+static void AppBoostMonitor_RxCallback(const uint8_t *data, uint16_t length)
+{
+    uint16_t index;
+
+    if (data == 0) {
+        return;
+    }
+
+    for (index = 0U; index < length; index++) {
+        if (data[index] == (uint8_t)'+') {
+            BoostControl_RequestIncreaseCurrentSetpoint();
+            return;
+        }
+        if (data[index] == (uint8_t)'-') {
+            BoostControl_RequestDecreaseCurrentSetpoint();
+            return;
+        }
+    }
 }
 
 /*!
@@ -148,6 +179,7 @@ static void AppBoostMonitor_Print(const boost_control_context_t *context)
 
     printf(
         "state=%s(%u) mode=%s(%u) fault=0x%08lX "
+        "target={vout=%.3fV,iout=%.3fA} "
         "adc={vout=%.3fV,iout=%.3fA,vin=%.3fV,ia=%.3fA,ib=%.3fA,ic=%.3fA} "
         "duty={a=%.3f%%,b=%.3f%%,c=%.3f%%}\r\n",
         AppBoostMonitor_StateToString(context->state),
@@ -155,6 +187,8 @@ static void AppBoostMonitor_Print(const boost_control_context_t *context)
         AppBoostMonitor_ModeToString(context->mode),
         (unsigned int)context->mode,
         (unsigned long)context->fault_flags,
+        context->voltage_setpoint_v,
+        context->current_setpoint_a,
         context->adc.output_voltage_v,
         context->adc.output_current_a,
         context->adc.input_voltage_v,

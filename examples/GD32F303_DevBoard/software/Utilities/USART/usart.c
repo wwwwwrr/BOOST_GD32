@@ -1,11 +1,14 @@
 #include "usart.h"
+#include "gd32f30x_dma.h"
 #include <stdio.h>
+
+#define USART0_RX_DMA_PERIPH       DMA0
+#define USART0_RX_DMA_RCU          RCU_DMA0
+#define USART0_RX_DMA_CHANNEL      DMA_CH4
 
 /* Private variables */
 static uint8_t rx_buffer[USART0_RX_BUFFER_SIZE];
 static uint8_t tx_buffer[USART0_TX_BUFFER_SIZE];
-static volatile uint16_t rx_head = 0;
-static volatile uint16_t rx_tail = 0;
 static volatile uint16_t tx_head = 0;
 static volatile uint16_t tx_tail = 0;
 static volatile uint8_t tx_busy = 0;
@@ -15,6 +18,9 @@ static usart_rx_callback_t rx_callback = NULL;
 /* Private function prototypes */
 static uint8_t USART0_BufferIsFull(uint16_t head, uint16_t tail, uint16_t size);
 static uint8_t USART0_BufferIsEmpty(uint16_t head, uint16_t tail);
+static void USART0_ConfigRxDma(void);
+static void USART0_ClearIdleFlag(void);
+static void USART0_HandleIdleReceive(void);
 static void USART0_EnableInterrupts(void);
 static void USART0_DisableInterrupts(void);
 
@@ -26,9 +32,10 @@ static void USART0_DisableInterrupts(void);
 */
 void USART0_Init(void)
 {
-    /* Enable GPIO and USART clocks */
+    /* Enable GPIO, USART and receive-DMA clocks. */
     rcu_periph_clock_enable(USART0_GPIO_RCU);
     rcu_periph_clock_enable(USART0_RCU);
+    rcu_periph_clock_enable(USART0_RX_DMA_RCU);
     
     /* Configure PA9 as TX and PA10 as RX on the default USART0 mapping. */
     gpio_init(USART0_GPIO, GPIO_MODE_AF_PP, GPIO_OSPEED_50MHZ, USART0_TX_PIN);
@@ -45,17 +52,18 @@ void USART0_Init(void)
 
     usart_receive_config(USART0_PERIPH, USART_RECEIVE_ENABLE);
     usart_transmit_config(USART0_PERIPH, USART_TRANSMIT_ENABLE);
-    
-    
+
+    USART0_ConfigRxDma();
+
     /* Enable USART */
     usart_enable(USART0_PERIPH);
-    
+
+    /* USART0 RX uses DMA0_CH4; no RBNE or DMA channel IRQ is enabled. */
+    usart_dma_receive_config(USART0_PERIPH, USART_RECEIVE_DMA_ENABLE);
+
     /* Clear buffers */
     USART0_ClearBuffers();
-    
-    /* Enable USART receive interrupt */
-    usart_interrupt_enable(USART0_PERIPH, USART_INT_RBNE);
-    
+
     /* Configure NVIC for USART0. */
     NVIC_CONFIG(USART0_IRQN, USART0_PRIORITY_GROUP, USART0_PRIORITY_SUBGROUP);
     
@@ -158,40 +166,7 @@ int fputc(int ch, FILE *stream)
 }
 
 /*!
-    \brief      Receive a byte from USART0 buffer
-    \param[in]  none
-    \param[out] none
-    \retval     received byte (0 if buffer empty)
-*/
-uint8_t USART0_ReceiveByte(void)
-{
-    uint8_t data = 0;
-    
-    USART0_DisableInterrupts();
-    
-    if (!USART0_BufferIsEmpty(rx_head, rx_tail)) {
-        data = rx_buffer[rx_tail];
-        rx_tail = (rx_tail + 1) % USART0_RX_BUFFER_SIZE;
-    }
-    
-    USART0_EnableInterrupts();
-    
-    return data;
-}
-
-/*!
-    \brief      Check if data is available in RX buffer
-    \param[in]  none
-    \param[out] none
-    \retval     1 if data available, 0 otherwise
-*/
-uint8_t USART0_IsDataAvailable(void)
-{
-    return !USART0_BufferIsEmpty(rx_head, rx_tail);
-}
-
-/*!
-    \brief      Clear USART0 buffers
+    \brief      Clear USART0 buffers and restart the receive DMA channel
     \param[in]  none
     \param[out] none
     \retval     none
@@ -199,24 +174,37 @@ uint8_t USART0_IsDataAvailable(void)
 void USART0_ClearBuffers(void)
 {
     USART0_DisableInterrupts();
-    
-    rx_head = 0;
-    rx_tail = 0;
+
+    dma_channel_disable(USART0_RX_DMA_PERIPH, USART0_RX_DMA_CHANNEL);
+    dma_flag_clear(USART0_RX_DMA_PERIPH,
+                   USART0_RX_DMA_CHANNEL,
+                   DMA_FLAG_G);
+    dma_memory_address_config(USART0_RX_DMA_PERIPH,
+                              USART0_RX_DMA_CHANNEL,
+                              (uint32_t)rx_buffer);
+    dma_transfer_number_config(USART0_RX_DMA_PERIPH,
+                               USART0_RX_DMA_CHANNEL,
+                               USART0_RX_BUFFER_SIZE);
+
     tx_head = 0;
     tx_tail = 0;
     tx_busy = 0;
-    
+
     memset(rx_buffer, 0, sizeof(rx_buffer));
     memset(tx_buffer, 0, sizeof(tx_buffer));
-    
+
+    USART0_ClearIdleFlag();
+    dma_channel_enable(USART0_RX_DMA_PERIPH, USART0_RX_DMA_CHANNEL);
+
     USART0_EnableInterrupts();
 }
 
 /*!
-    \brief      Set RX callback function
-    \param[in]  callback: function pointer to call when data received
+    \brief      Set DMA + IDLE receive callback function
+    \param[in]  callback: function called with one completed receive batch
     \param[out] none
     \retval     none
+    \note       The callback runs in USART0 interrupt context and must not block
 */
 void USART0_SetRxCallback(usart_rx_callback_t callback)
 {
@@ -231,27 +219,10 @@ void USART0_SetRxCallback(usart_rx_callback_t callback)
 */
 static void USART0_HandlerInternal(void)
 {
-    /* Receive buffer not empty interrupt */
-    if (usart_interrupt_flag_get(USART0_PERIPH, USART_INT_FLAG_RBNE) != RESET) {
-        uint8_t data = usart_data_receive(USART0_PERIPH);
-        
-        /* Add to RX buffer */
-        if (!USART0_BufferIsFull(rx_head, rx_tail, USART0_RX_BUFFER_SIZE)) {
-            rx_buffer[rx_head] = data;
-            rx_head = (rx_head + 1) % USART0_RX_BUFFER_SIZE;
-            
-            /* Call callback if set */
-            if (rx_callback != NULL) {
-                rx_callback(data);
-            }
-            
-            /* Loopback: echo received data */
-            if (loopback_enabled) {
-                USART0_SendByte(data);
-            }
-        }
-        
-        usart_interrupt_flag_clear(USART0_PERIPH, USART_INT_FLAG_RBNE);
+    /* RX DMA batch is complete after one USART frame of line idle time. */
+    if (usart_interrupt_flag_get(USART0_PERIPH,
+                                 USART_INT_FLAG_IDLE) != RESET) {
+        USART0_HandleIdleReceive();
     }
     
     /* Transmit buffer empty interrupt */
@@ -268,6 +239,97 @@ static void USART0_HandlerInternal(void)
         
         usart_interrupt_flag_clear(USART0_PERIPH, USART_INT_FLAG_TBE);
     }
+}
+
+/*!
+    \brief      Configure DMA0_CH4 for one USART0 receive batch
+    \param[in]  none
+    \param[out] none
+    \retval     none
+    \note       DMA interrupts and circulation mode remain disabled
+*/
+static void USART0_ConfigRxDma(void)
+{
+    dma_parameter_struct dma_init_struct;
+
+    dma_deinit(USART0_RX_DMA_PERIPH, USART0_RX_DMA_CHANNEL);
+    dma_struct_para_init(&dma_init_struct);
+    dma_init_struct.periph_addr = (uint32_t)&USART_DATA(USART0_PERIPH);
+    dma_init_struct.periph_inc = DMA_PERIPH_INCREASE_DISABLE;
+    dma_init_struct.memory_addr = (uint32_t)rx_buffer;
+    dma_init_struct.memory_inc = DMA_MEMORY_INCREASE_ENABLE;
+    dma_init_struct.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+    dma_init_struct.memory_width = DMA_MEMORY_WIDTH_8BIT;
+    dma_init_struct.direction = DMA_PERIPHERAL_TO_MEMORY;
+    dma_init_struct.number = USART0_RX_BUFFER_SIZE;
+    dma_init_struct.priority = DMA_PRIORITY_LOW;
+    dma_init(USART0_RX_DMA_PERIPH,
+             USART0_RX_DMA_CHANNEL,
+             &dma_init_struct);
+    dma_circulation_disable(USART0_RX_DMA_PERIPH, USART0_RX_DMA_CHANNEL);
+    dma_interrupt_disable(USART0_RX_DMA_PERIPH,
+                          USART0_RX_DMA_CHANNEL,
+                          DMA_INT_FTF | DMA_INT_HTF | DMA_INT_ERR);
+}
+
+/*!
+    \brief      Clear USART0 IDLE by the required STAT0 then DATA read sequence
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+static void USART0_ClearIdleFlag(void)
+{
+    volatile uint32_t idle_clear;
+
+    idle_clear = USART_STAT0(USART0_PERIPH);
+    idle_clear = USART_DATA(USART0_PERIPH);
+    (void)idle_clear;
+}
+
+/*!
+    \brief      Complete one RX DMA batch and dispatch it from IDLE ISR context
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+static void USART0_HandleIdleReceive(void)
+{
+    uint32_t remaining_count;
+    uint16_t received_length;
+    uint16_t index;
+
+    USART0_ClearIdleFlag();
+    dma_channel_disable(USART0_RX_DMA_PERIPH, USART0_RX_DMA_CHANNEL);
+    remaining_count = dma_transfer_number_get(USART0_RX_DMA_PERIPH,
+                                               USART0_RX_DMA_CHANNEL);
+    if (remaining_count <= USART0_RX_BUFFER_SIZE) {
+        received_length = (uint16_t)(USART0_RX_BUFFER_SIZE -
+                                     remaining_count);
+    } else {
+        received_length = 0U;
+    }
+
+    if ((received_length != 0U) && (rx_callback != NULL)) {
+        rx_callback(rx_buffer, received_length);
+    }
+
+    if (loopback_enabled != 0U) {
+        for (index = 0U; index < received_length; index++) {
+            (void)USART0_SendByte(rx_buffer[index]);
+        }
+    }
+
+    dma_flag_clear(USART0_RX_DMA_PERIPH,
+                   USART0_RX_DMA_CHANNEL,
+                   DMA_FLAG_G);
+    dma_memory_address_config(USART0_RX_DMA_PERIPH,
+                              USART0_RX_DMA_CHANNEL,
+                              (uint32_t)rx_buffer);
+    dma_transfer_number_config(USART0_RX_DMA_PERIPH,
+                               USART0_RX_DMA_CHANNEL,
+                               USART0_RX_BUFFER_SIZE);
+    dma_channel_enable(USART0_RX_DMA_PERIPH, USART0_RX_DMA_CHANNEL);
 }
 
 /*!
@@ -314,7 +376,7 @@ static uint8_t USART0_BufferIsEmpty(uint16_t head, uint16_t tail)
 */
 static void USART0_DisableInterrupts(void)
 {
-    usart_interrupt_disable(USART0_PERIPH, USART_INT_RBNE);
+    usart_interrupt_disable(USART0_PERIPH, USART_INT_IDLE);
     usart_interrupt_disable(USART0_PERIPH, USART_INT_TBE);
 }
 
@@ -326,7 +388,7 @@ static void USART0_DisableInterrupts(void)
 */
 static void USART0_EnableInterrupts(void)
 {
-    usart_interrupt_enable(USART0_PERIPH, USART_INT_RBNE);
+    usart_interrupt_enable(USART0_PERIPH, USART_INT_IDLE);
     if (tx_busy) {
         usart_interrupt_enable(USART0_PERIPH, USART_INT_TBE);
     }

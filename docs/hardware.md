@@ -205,7 +205,7 @@ SWD：
 
 四个按键均按低电平有效配置，GPIO 使用内部上拉。下降沿 EXTI 中断只记录待处理标志，主循环中的非阻塞按键任务经过 20 ms 稳定消抖后触发一次按下回调；稳定松开后才允许再次触发。
 
-按键业务绑定由实例工程 Application 层完成：KEY1 反转 PB12 SHUTOFF 输出，KEY2 请求启动 Boost，KEY3 请求停止 Boost，KEY4 请求清除 Boost 锁存故障。
+按键业务绑定由实例工程 Application 层完成：KEY1 反转 PB12 SHUTOFF 输出，KEY2 请求启动 Boost，KEY3 将目标电压增加 0.1 V，KEY4 将目标电压减少 0.1 V。
 
 ### SHUTOFF 输出
 

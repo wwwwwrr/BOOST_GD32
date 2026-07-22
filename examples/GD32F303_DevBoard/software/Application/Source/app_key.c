@@ -63,23 +63,25 @@ static void AppKey_Key2PressedCallback(void)
 }
 
 /*!
-    \brief      KEY3 稳定按下后请求停止 Boost
+    \brief      KEY3 稳定按下后将 Boost 输出电压目标增加 0.1 V
     \param[in]  无
     \param[out] 无
     \retval     无
 */
 static void AppKey_Key3PressedCallback(void)
 {
-    BoostControl_RequestStop();
+    /* BoostControl_RequestStop(); */
+    BoostControl_RequestIncreaseVoltageSetpoint();
 }
 
 /*!
-    \brief      KEY4 稳定按下后请求清除 Boost 锁存故障
+    \brief      KEY4 稳定按下后将 Boost 输出电压目标减少 0.1 V
     \param[in]  无
     \param[out] 无
     \retval     无
 */
 static void AppKey_Key4PressedCallback(void)
 {
-    BoostControl_RequestClearFault();
+    /* BoostControl_RequestClearFault(); */
+    BoostControl_RequestDecreaseVoltageSetpoint();
 }

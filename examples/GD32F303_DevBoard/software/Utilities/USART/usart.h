@@ -5,7 +5,7 @@
     \file    usart.h
     \brief   USART module for serial communication
 
-    \version 2026-7-15, V1.1.0, USART0 communication implementation
+    \version 2026-7-22, V1.2.0, USART0 DMA + IDLE reception
 */
 
 #include "gd32f30x.h"
@@ -46,12 +46,10 @@ void USART0_LoopbackEnable(void);
 void USART0_LoopbackDisable(void);
 usart_status_t USART0_SendByte(uint8_t data);
 usart_status_t USART0_SendString(const char *str);
-uint8_t USART0_ReceiveByte(void);
-uint8_t USART0_IsDataAvailable(void);
 void USART0_ClearBuffers(void);
 
-/* Interrupt callback type */
-typedef void (*usart_rx_callback_t)(uint8_t data);
+/* DMA + IDLE receive callback. The callback runs in USART0 ISR context. */
+typedef void (*usart_rx_callback_t)(const uint8_t *data, uint16_t length);
 
 /* Callback registration */
 void USART0_SetRxCallback(usart_rx_callback_t callback);

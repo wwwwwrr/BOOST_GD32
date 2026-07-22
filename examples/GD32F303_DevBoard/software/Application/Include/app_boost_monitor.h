@@ -3,11 +3,11 @@
 
 /*!
     \file    app_boost_monitor.h
-    \brief   实例工程 Boost 状态串口监视接口
+    \brief   实例工程 Boost 串口命令与状态监视接口
 */
 
 /*!
-    \brief      初始化 USART0 与 Boost 状态监视任务
+    \brief      初始化 USART0 与 Boost 状态监视、命令接收任务
     \param[in]  无
     \param[out] 无
     \retval     无

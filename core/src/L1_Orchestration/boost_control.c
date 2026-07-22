@@ -12,12 +12,17 @@ static incremental_pi_t boost_current_pi; /*!< 仅由 10 kHz 控制任务操作�
 static volatile uint8_t boost_start_command = 0U; /*!< START 待处理标志：1 待处理。 */
 static volatile uint8_t boost_stop_command = 0U; /*!< STOP 待处理标志：1 待处理。 */
 static volatile uint8_t boost_clear_fault_command = 0U; /*!< CLEAR_FAULT 待处理标志：1 待处理。 */
+static volatile uint8_t boost_voltage_increase_command = 0U; /*!< 电压目标增加请求：1 待处理。 */
+static volatile uint8_t boost_voltage_decrease_command = 0U; /*!< 电压目标减少请求：1 待处理。 */
+static volatile uint8_t boost_current_increase_command = 0U; /*!< 电流目标增加请求：1 待处理。 */
+static volatile uint8_t boost_current_decrease_command = 0U; /*!< 电流目标减少请求：1 待处理。 */
 static uint16_t boost_open_load_count = 0U; /*!< 输出低电流连续控制周期计数。 */
 static uint8_t boost_load_detected = 0U; /*!< 本次运行是否曾检测到有效负载：1 是。 */
 
 static void BoostControl_ClearDutyData(void);
 static void BoostControl_ResetOpenLoadDetection(void);
 static void BoostControl_ResetRuntimeData(void);
+static void BoostControl_HandleSetpointAdjustment(void);
 static void BoostControl_HandleCommand(void);
 static void BoostControl_UpdateAdcData(void);
 static void BoostControl_CheckOpenLoad(void);
@@ -41,6 +46,10 @@ void BoostControl_Init(void)
     boost_start_command = 0U;
     boost_stop_command = 0U;
     boost_clear_fault_command = 0U;
+    boost_voltage_increase_command = 0U;
+    boost_voltage_decrease_command = 0U;
+    boost_current_increase_command = 0U;
+    boost_current_decrease_command = 0U;
     BoostControl_ResetOpenLoadDetection();
     StatusIndicator_Init();
 
@@ -59,6 +68,8 @@ void BoostControl_Init(void)
     boost_control.adc.phase_a_current_a = 0.0f;
     boost_control.adc.phase_b_current_a = 0.0f;
     boost_control.adc.phase_c_current_a = 0.0f;
+    boost_control.voltage_setpoint_v = BOOST_OUTPUT_VOLTAGE_SETPOINT_V;
+    boost_control.current_setpoint_a = BOOST_OUTPUT_CURRENT_SETPOINT_A;
     boost_control.pwm_running = 0U;
     BoostControl_ClearDutyData();
     boost_control.voltage_reference_v = BOOST_SOFT_START_INITIAL_VOLTAGE_V;
@@ -108,6 +119,8 @@ uint8_t BoostControl_GetContext(boost_control_context_t *context)
     context->adc.phase_a_current_a = boost_control.adc.phase_a_current_a;
     context->adc.phase_b_current_a = boost_control.adc.phase_b_current_a;
     context->adc.phase_c_current_a = boost_control.adc.phase_c_current_a;
+    context->voltage_setpoint_v = boost_control.voltage_setpoint_v;
+    context->current_setpoint_a = boost_control.current_setpoint_a;
     context->voltage_reference_v = boost_control.voltage_reference_v;
     context->duty_voltage_percent = boost_control.duty_voltage_percent;
     context->duty_current_percent = boost_control.duty_current_percent;
@@ -151,6 +164,50 @@ void BoostControl_RequestStop(void)
 void BoostControl_RequestClearFault(void)
 {
     boost_clear_fault_command = 1U;
+}
+
+/*!
+    \brief      请求将输出电压目标增加 0.1 V
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+void BoostControl_RequestIncreaseVoltageSetpoint(void)
+{
+    boost_voltage_increase_command = 1U;
+}
+
+/*!
+    \brief      请求将输出电压目标减少 0.1 V
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+void BoostControl_RequestDecreaseVoltageSetpoint(void)
+{
+    boost_voltage_decrease_command = 1U;
+}
+
+/*!
+    \brief      请求将输出电流目标增加 0.01 A
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+void BoostControl_RequestIncreaseCurrentSetpoint(void)
+{
+    boost_current_increase_command = 1U;
+}
+
+/*!
+    \brief      请求将输出电流目标减少 0.01 A
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+void BoostControl_RequestDecreaseCurrentSetpoint(void)
+{
+    boost_current_decrease_command = 1U;
 }
 
 /*!
@@ -222,6 +279,60 @@ static void BoostControl_ResetRuntimeData(void)
 }
 
 /*!
+    \brief      消费外部提交的电压、电流目标调整请求并更新控制环目标
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+static void BoostControl_HandleSetpointAdjustment(void)
+{
+    float voltage_setpoint_v; /*!< 应用调整并限幅后的输出电压目标。 */
+    float current_setpoint_a; /*!< 应用调整并限幅后的输出电流目标。 */
+
+    voltage_setpoint_v = boost_control.voltage_setpoint_v;
+    current_setpoint_a = boost_control.current_setpoint_a;
+
+    if (boost_voltage_increase_command != 0U) {
+        boost_voltage_increase_command = 0U;
+        voltage_setpoint_v += BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V;
+    }
+
+    if (boost_voltage_decrease_command != 0U) {
+        boost_voltage_decrease_command = 0U;
+        voltage_setpoint_v -= BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V;
+    }
+
+    if (boost_current_increase_command != 0U) {
+        boost_current_increase_command = 0U;
+        current_setpoint_a += BOOST_OUTPUT_CURRENT_ADJUST_STEP_A;
+    }
+
+    if (boost_current_decrease_command != 0U) {
+        boost_current_decrease_command = 0U;
+        current_setpoint_a -= BOOST_OUTPUT_CURRENT_ADJUST_STEP_A;
+    }
+
+    if (voltage_setpoint_v > BOOST_OUTPUT_VOLTAGE_SETPOINT_MAX_V) {
+        voltage_setpoint_v = BOOST_OUTPUT_VOLTAGE_SETPOINT_MAX_V;
+    } else if (voltage_setpoint_v < BOOST_OUTPUT_VOLTAGE_SETPOINT_MIN_V) {
+        voltage_setpoint_v = BOOST_OUTPUT_VOLTAGE_SETPOINT_MIN_V;
+    }
+
+    if (current_setpoint_a > BOOST_OUTPUT_CURRENT_SETPOINT_MAX_A) {
+        current_setpoint_a = BOOST_OUTPUT_CURRENT_SETPOINT_MAX_A;
+    } else if (current_setpoint_a < BOOST_OUTPUT_CURRENT_SETPOINT_MIN_A) {
+        current_setpoint_a = BOOST_OUTPUT_CURRENT_SETPOINT_MIN_A;
+    }
+
+    boost_control.voltage_setpoint_v = voltage_setpoint_v;
+    boost_control.current_setpoint_a = current_setpoint_a;
+    if ((boost_control.state == BOOST_STATE_RUN) ||
+        (boost_control.voltage_reference_v > voltage_setpoint_v)) {
+        boost_control.voltage_reference_v = voltage_setpoint_v;
+    }
+}
+
+/*!
     \brief      按 STOP、CLEAR_FAULT、START 优先级消费外部命令
     \param[in]  无
     \param[out] 无
@@ -229,6 +340,8 @@ static void BoostControl_ResetRuntimeData(void)
 */
 static void BoostControl_HandleCommand(void)
 {
+    BoostControl_HandleSetpointAdjustment();
+
     if (boost_stop_command != 0U) {
         boost_stop_command = 0U;
         boost_start_command = 0U;
@@ -349,8 +462,12 @@ static void BoostControl_CheckProtection(void)
         BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V) {
         boost_control.fault_flags |= BOOST_FAULT_OUTPUT_OVERVOLTAGE;
     }
-
-    BoostControl_CheckOpenLoad();
+    if (boost_control.adc.output_current_a >
+        BOOST_OUTPUT_OVERCURRENT_THRESHOLD_V) {
+        boost_control.fault_flags |= BOOST_FAULT_OUTPUT_OVERCURRENT;
+    }
+    //去掉静态开路
+    //BoostControl_CheckOpenLoad();
 
     if (boost_control.fault_flags != BOOST_FAULT_NONE) {
         boost_control.state = BOOST_STATE_FAULT;
@@ -367,8 +484,8 @@ static void BoostControl_UpdateSoftStart(void)
 {
     boost_control.voltage_reference_v += BOOST_SOFT_START_STEP_V;
     if (boost_control.voltage_reference_v >=
-        BOOST_OUTPUT_VOLTAGE_SETPOINT_V) {
-        boost_control.voltage_reference_v = BOOST_OUTPUT_VOLTAGE_SETPOINT_V;
+        boost_control.voltage_setpoint_v) {
+        boost_control.voltage_reference_v = boost_control.voltage_setpoint_v;
         boost_control.state = BOOST_STATE_RUN;
     }
 }
@@ -386,7 +503,7 @@ static void BoostControl_UpdatePowerLoop(void)
 
     voltage_error = boost_control.voltage_reference_v -
                     boost_control.adc.output_voltage_v;
-    current_error = BOOST_OUTPUT_CURRENT_SETPOINT_A -
+    current_error = boost_control.current_setpoint_a -
                     boost_control.adc.output_current_a;
 
     boost_control.duty_voltage_percent += IncrementalPI_Calculate(

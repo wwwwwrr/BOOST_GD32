@@ -281,7 +281,6 @@ calibration_cleanup:
 uint8_t ADC0_GetLatestRaw(adc0_frame_raw_t *result, uint32_t *sequence)
 {
     uint32_t state_before;                 /*!< 复制 raw 前的 ADC0 发布状态 */
-    uint32_t state_after;                  /*!< 复制 raw 后的 ADC0 发布状态 */
     uint32_t sequence_before;              /*!< 本次读取的完整数据序号 */
     uint8_t snapshot_index;                /*!< 当前 ADC0 发布缓冲的数组下标 */
 
@@ -289,7 +288,7 @@ uint8_t ADC0_GetLatestRaw(adc0_frame_raw_t *result, uint32_t *sequence)
         return 0U;
     }
 
-    do {
+
         state_before = adc0_published_state;
         sequence_before = state_before >> 1U;
         if (sequence_before == 0U) {
@@ -305,8 +304,8 @@ uint8_t ADC0_GetLatestRaw(adc0_frame_raw_t *result, uint32_t *sequence)
         result->input_voltage_raw =
             adc0_snapshot_buffer[snapshot_index].input_voltage_raw;
         __DMB();
-        state_after = adc0_published_state;
-    } while (state_before != state_after);
+
+   
 
     *sequence = sequence_before;
     return 1U;

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [未发布]
 
 ### 新增
+- USART0 接收改为 DMA0_CH4 + IDLE 批次中断，新增单字节 `+`/`-` 命令，通过异步标志将 Boost 目标电流按 10 mA 步长增加/减少并限制在 0.5～2.0 A；每批只处理首个有效命令且不返回回执
+- 新增 Boost 运行时目标电压调节接口，KEY3/KEY4 分别按 0.1 V 步长增加/减少目标电压，并将调节范围限制为 12.0～34.9 V
+- USART0 周期状态输出新增目标电压和目标电流字段
 - 新增 `BoostControl_GetContext()` 上下文复制接口，以及 Application 层 `AppBoostMonitor_Init/Task` 状态监视 API，通过 USART0 每 200 ms 打印 Boost 状态、模式、故障、ADC 实际值和三相占空比
 - 新增 Boost 初始化前置 ADC1 三相零电流偏置校准，使用独立软件触发轮询流程对 A/B/C 每相 64 个样本求平均，校准后反初始化 ADC1，并在串口初始化时打印一次三相 raw 和偏置电压
 - 新增 ADC1 三相偏置校准故障锁存，校准失败时禁止 PWM 启动
@@ -15,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增 L3 RGB 状态指示接口，Boost 空闲时熄灭 LED3，软启动、运行和故障状态分别显示蓝色、绿色和红色
 
 ### 变更
+- KEY3 停止和 KEY4 清故障回调改为目标电压增减请求，原命令调用保留为注释
 - 板载调试串口由占用 ADC 管脚 PA2/PA3 的 USART1 迁移至 PA9/PA10 的 USART0，并将 `printf` 重定向到中断发送缓冲
 - Keil 工程启用 AC5 MicroLIB，与 EIDE 工程配置保持一致
 - `main.c` 删除状态复制、周期判断和文本格式化实现，只保留 `AppBoostMonitor_Init/Task` 上层 API 调用

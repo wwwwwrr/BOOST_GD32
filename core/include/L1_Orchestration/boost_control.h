@@ -22,7 +22,8 @@ typedef enum {
     BOOST_FAULT_NONE = 0x00000000U,             /*!< 当前没有锁存故障。 */
     BOOST_FAULT_OUTPUT_OVERVOLTAGE = 0x00000001U, /*!< Boost 输出过压故障。 */
     BOOST_FAULT_ADC_PHASE_CALIBRATION = 0x00000002U, /*!< ADC1 三相偏置校准故障。 */
-    BOOST_FAULT_OUTPUT_OPEN = 0x00000004U        /*!< Boost 输出开路故障。 */
+    BOOST_FAULT_OUTPUT_OPEN = 0x00000004U,        /*!< Boost 输出开路故障。 */
+    BOOST_FAULT_OUTPUT_OVERCURRENT = 0x00000008U        /*!< Boost 输出过流故障。 */
 } boost_fault_flag_t;
 
 /*! \brief Boost 控制使用的 ADC 实际值。 */
@@ -35,13 +36,15 @@ typedef struct {
     float phase_c_current_a;      /*!< C 相电感电流，单位 A。 */
 } boost_adc_data_t;
 
-/*! \brief Boost 状态、ADC、软启动目标及占空比运行上下文。 */
+/*! \brief Boost 状态、ADC、控制目标及占空比运行上下文。 */
 typedef struct {
     boost_system_state_t state;   /*!< 当前 Boost 系统状态。 */
     boost_power_mode_t mode;      /*!< 当前恒压或恒流限制模式。 */
     uint32_t fault_flags;         /*!< 已锁存的 Boost 故障标志位。 */
     boost_adc_data_t adc;         /*!< 当前控制周期使用的 ADC 实际值。 */
-    float voltage_reference_v;    /*!< 当前软启动电压目标，单位 V。 */
+    float voltage_setpoint_v;     /*!< 用户设定的最终输出电压目标，单位 V。 */
+    float current_setpoint_a;     /*!< 用户设定的输出电流目标，单位 A。 */
+    float voltage_reference_v;    /*!< 控制环当前使用的电压目标，单位 V。 */
     float duty_voltage_percent;   /*!< 电压环占空比输出，单位 %。 */
     float duty_current_percent;   /*!< 电流环占空比输出，单位 %。 */
     float duty_total_percent;     /*!< 双环取小后的公共占空比，单位 %。 */
@@ -94,6 +97,42 @@ void BoostControl_RequestStop(void);
     \note       仅在故障状态有效，保护条件仍存在时会在同一周期重新锁存
 */
 void BoostControl_RequestClearFault(void);
+
+/*!
+    \brief      请求将输出电压目标增加一个配置步长
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+    \note       请求由下一个 10 kHz 控制周期处理，并限制在安全范围内
+*/
+void BoostControl_RequestIncreaseVoltageSetpoint(void);
+
+/*!
+    \brief      请求将输出电压目标减少一个配置步长
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+    \note       请求由下一个 10 kHz 控制周期处理，并限制在安全范围内
+*/
+void BoostControl_RequestDecreaseVoltageSetpoint(void);
+
+/*!
+    \brief      请求将输出电流目标增加一个配置步长
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+    \note       请求由下一个 10 kHz 控制周期处理，并限制在安全范围内
+*/
+void BoostControl_RequestIncreaseCurrentSetpoint(void);
+
+/*!
+    \brief      请求将输出电流目标减少一个配置步长
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+    \note       请求由下一个 10 kHz 控制周期处理，并限制在安全范围内
+*/
+void BoostControl_RequestDecreaseCurrentSetpoint(void);
 
 /*!
     \brief      执行 Boost 10 kHz 快速控制任务

@@ -25,7 +25,7 @@
 /* Iout = Vadc_iout / (BSP_ADC_IOUT_AMP_GAIN * BSP_ADC_IOUT_RSENSE) = Vadc_iout * 3.9. */
 #define BSP_ADC_IOUT_GAIN          (1.0f / (BSP_ADC_IOUT_AMP_GAIN * BSP_ADC_IOUT_RSENSE))
 
-/* Iphase = delta-V / (25.64 * Rsense) = delta-V * 8. */
+/* Iphase = delta-V / (25.64 * Rsense) = delta-V * 3.9. */
 #define BSP_ADC_PHASE_GAIN         (1.0f / (BSP_ADC_IOUT_AMP_GAIN * BSP_ADC_CURRENT_RSENSE))
 
 /* ADC1 上电偏置校准：先丢弃8轮，再对每相64个样本求平均。 */
@@ -41,13 +41,23 @@
 
 /* Boost 恒压、恒流与首版输出过压保护目标。 */
 #define BOOST_OUTPUT_VOLTAGE_SETPOINT_V        30.0f
-#define BOOST_OUTPUT_CURRENT_SETPOINT_A        2.0f
-#define BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V   35.0f
+#define BOOST_OUTPUT_CURRENT_SETPOINT_A        1.0f
+#define BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V   50.0f
+#define BOOST_OUTPUT_OVERCURRENT_THRESHOLD_V   3.0f
+//电压调节
+#define BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V      10.0f
+#define BOOST_OUTPUT_VOLTAGE_SETPOINT_MIN_V     12.0f
+#define BOOST_OUTPUT_VOLTAGE_SETPOINT_MAX_V     \
+    (BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V - BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V)
+//电流调节
+#define BOOST_OUTPUT_CURRENT_ADJUST_STEP_A       0.1f
+#define BOOST_OUTPUT_CURRENT_SETPOINT_MIN_A      0.2f
+#define BOOST_OUTPUT_CURRENT_SETPOINT_MAX_A      2.0f
 
 /* Boost 静态开路与运行中断开保护参数。 */
-#define BOOST_OPEN_LOAD_CURRENT_THRESHOLD_A       0.05f
-#define BOOST_LOAD_PRESENT_CURRENT_THRESHOLD_A    0.20f
-#define BOOST_STATIC_OPEN_ARM_VOLTAGE_V            18.0f
+#define BOOST_OPEN_LOAD_CURRENT_THRESHOLD_A       0.09f
+#define BOOST_LOAD_PRESENT_CURRENT_THRESHOLD_A    0.15f
+#define BOOST_STATIC_OPEN_ARM_VOLTAGE_V            16.0f
 #define BOOST_STATIC_OPEN_CONFIRM_TIME_MS          5.0f
 #define BOOST_RUNTIME_OPEN_CONFIRM_TIME_MS         0.5f
 
@@ -70,7 +80,7 @@
 
 /* 三相公共占空比及单个控制周期的最大允许变化量，单位均为百分比。 */
 #define BOOST_DUTY_MIN_PERCENT                 0.0f
-#define BOOST_DUTY_MAX_PERCENT                 60.0f
+#define BOOST_DUTY_MAX_PERCENT                 80.0f
 #define BOOST_DUTY_MAX_STEP_PERCENT            0.1f
 
 /*
@@ -78,11 +88,11 @@
  * Ki 直接表示每个 10 kHz 控制周期的系数，不再换算为每秒值。
  * 当前 Kd 为 0，结构体中仅保留该参数供后续扩展。
  */
-#define BOOST_VOLTAGE_PI_KP                    0.05f
-#define BOOST_VOLTAGE_PI_KI_PER_CYCLE          0.001f
+#define BOOST_VOLTAGE_PI_KP                    0.7f
+#define BOOST_VOLTAGE_PI_KI_PER_CYCLE          0.01f
 #define BOOST_VOLTAGE_PI_KD                    0.0f
-#define BOOST_CURRENT_PI_KP                    0.05f
-#define BOOST_CURRENT_PI_KI_PER_CYCLE          0.001f
+#define BOOST_CURRENT_PI_KP                    2.0f
+#define BOOST_CURRENT_PI_KI_PER_CYCLE          0.1f
 #define BOOST_CURRENT_PI_KD                    0.0f
 
 #endif /* PROJECT_CFG_INIT_VALUES_H */
