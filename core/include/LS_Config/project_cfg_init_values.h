@@ -42,13 +42,13 @@
 /* Boost 恒压、恒流与首版输出过压保护目标。 */
 #define BOOST_OUTPUT_VOLTAGE_SETPOINT_V        30.0f
 #define BOOST_OUTPUT_CURRENT_SETPOINT_A        1.0f
-#define BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V   50.0f
+#define BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V   70.0f
 #define BOOST_OUTPUT_OVERCURRENT_THRESHOLD_V   3.0f
 //电压调节
 #define BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V      10.0f
 #define BOOST_OUTPUT_VOLTAGE_SETPOINT_MIN_V     12.0f
-#define BOOST_OUTPUT_VOLTAGE_SETPOINT_MAX_V     \
-    (BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V - BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V)
+#define BOOST_OUTPUT_VOLTAGE_SETPOINT_MAX_V     65.0f
+   
 //电流调节
 #define BOOST_OUTPUT_CURRENT_ADJUST_STEP_A       0.1f
 #define BOOST_OUTPUT_CURRENT_SETPOINT_MIN_A      0.2f
@@ -80,7 +80,7 @@
 
 /* 三相公共占空比及单个控制周期的最大允许变化量，单位均为百分比。 */
 #define BOOST_DUTY_MIN_PERCENT                 0.0f
-#define BOOST_DUTY_MAX_PERCENT                 80.0f
+#define BOOST_DUTY_MAX_PERCENT                 90.0f
 #define BOOST_DUTY_MAX_STEP_PERCENT            0.1f
 
 /*
@@ -88,11 +88,11 @@
  * Ki 直接表示每个 10 kHz 控制周期的系数，不再换算为每秒值。
  * 当前 Kd 为 0，结构体中仅保留该参数供后续扩展。
  */
-#define BOOST_VOLTAGE_PI_KP                    0.7f
-#define BOOST_VOLTAGE_PI_KI_PER_CYCLE          0.01f
+#define BOOST_VOLTAGE_PI_KP                    0.6f
+#define BOOST_VOLTAGE_PI_KI_PER_CYCLE          0.05f
 #define BOOST_VOLTAGE_PI_KD                    0.0f
-#define BOOST_CURRENT_PI_KP                    2.0f
-#define BOOST_CURRENT_PI_KI_PER_CYCLE          0.1f
+#define BOOST_CURRENT_PI_KP                    2.5f
+#define BOOST_CURRENT_PI_KI_PER_CYCLE          0.8f
 #define BOOST_CURRENT_PI_KD                    0.0f
 
 #endif /* PROJECT_CFG_INIT_VALUES_H */

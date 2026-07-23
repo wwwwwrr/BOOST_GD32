@@ -108,8 +108,9 @@ void PWM_Init(void)
     rcu_periph_clock_enable(PWM_PHASE_A_TIMER_RCU);
     rcu_periph_clock_enable(PWM_PHASE_B_TIMER_RCU);
     rcu_periph_clock_enable(PWM_PHASE_C_TIMER_RCU);
-
+    
     PWM_GPIO_ConfigureSafeLow();
+    PWM_GPIO_ConfigureAlternateFunction();
 
     timer_deinit(PWM_PHASE_A_TIMER);
     timer_deinit(PWM_PHASE_B_TIMER);
@@ -161,7 +162,7 @@ void PWM_Start(void)
 
     /* UPG 在装载相位计数初值前，将 ARR/CCR 影子值同步到工作寄存器。 */
     PWM_ReloadSynchronizationState();
-    PWM_GPIO_ConfigureAlternateFunction();
+    //PWM_GPIO_ConfigureAlternateFunction();
 
     /* 软件只启动 TIMER3 主定时器，TRGO 随后启动两个 Event 模式从定时器。 */
     timer_enable(PWM_PHASE_A_TIMER);

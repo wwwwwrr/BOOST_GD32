@@ -222,6 +222,9 @@ void BoostControl_10kHzHandler(void)
     BoostControl_HandleCommand();
     BoostControl_UpdateAdcData();
     BoostControl_CheckProtection();
+    if (boost_control.state == BOOST_STATE_FAULT) {
+        BoostControl_ExecuteState();
+    }
     if (boost_control.state == BOOST_STATE_SOFT_START) {
         BoostControl_UpdateSoftStart();
     }
@@ -231,13 +234,14 @@ void BoostControl_10kHzHandler(void)
     }
 
     BoostControl_ExecuteState();
+
 }
 
 /*!
     \brief      清零 Boost 三个占空比计算结果
     \param[in]  无
     \param[out] 无
-    \retval     无
+    \retval     无 
 */
 static void BoostControl_ClearDutyData(void)
 {
