@@ -35,8 +35,8 @@
 #error "PWM period must be divisible by three for exact 120-degree phase offsets"
 #endif
 
-#if (PWM_PERIOD_COUNTS > 65536U)
-#error "PWM period does not fit the 16-bit timer counter"
+#if (PWM_PERIOD_COUNTS > 65535U)
+#error "PWM period and compare threshold must fit the 16-bit timer registers"
 #endif
 
 /* A 相：TIMER3 主定时器，PB6/CH0 为正向输出，PB7/CH1 为逻辑互补输出。 */
@@ -67,7 +67,7 @@
 #define PWM_DEFAULT_DUTY_B              20.0f /*!< B 相初始化请求占空比，单位 %；初始化期间输出保持关闭。 */
 #define PWM_DEFAULT_DUTY_C              20.0f /*!< C 相初始化请求占空比，单位 %；初始化期间输出保持关闭。 */
 
-/* 计数器预装值使 A/B/C 下一次上升沿依次相差 0、120、240 度。 */
+/* 计数器预装值使 A/B/C 计数周期边界依次相差 0、120、240 度。 */
 #define PWM_PHASE_A_COUNTER_START       0U /*!< A 相同步启动时的计数器初值。 */
 #define PWM_PHASE_B_COUNTER_START       (PWM_PHASE_STEP_COUNTS * 2U) /*!< B 相同步启动时的计数器初值。 */
 #define PWM_PHASE_C_COUNTER_START       PWM_PHASE_STEP_COUNTS /*!< C 相同步启动时的计数器初值。 */
@@ -112,7 +112,7 @@ void PWM_Stop(void);
     \param[in]  duty_percent: 请求占空比，单位 %，底层限制到 0～100
     \param[out] 无
     \retval     无
-    \note       同一相的 CH0/CH1 使用 PWM0/PWM1 形成逻辑互补波形
+    \note       CH0 使用 PWM1 在每周期内先低后高，CH1 使用 PWM0 形成逻辑互补波形
 */
 void PWM_SetDutyCycle(pwm_phase_t phase, float duty_percent);
 

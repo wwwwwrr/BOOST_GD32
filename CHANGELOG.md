@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增 L3 RGB 状态指示接口，Boost 空闲时熄灭 LED3，软启动、运行和故障状态分别显示蓝色、绿色和红色
 
 ### 变更
+- 三相 PWM 保持边沿对齐向上计数和 A→B→C 的 120° 相序，将正向 CH0 改为 PWM1、互补 CH1 改为 PWM0，并按低电平结束位置换算 CCR，使请求占空比表示每周期末段的高电平比例
+- ADC1 的 PWM 同步运行时采样顺序由 A→B→C 调整为 B→C→A，使 114°、234°、354° 三个触发点分别对应当前 PWM 各 120° 区间末尾的 B、C、A 相；偏置校准和读取结果字段仍保持 A/B/C 语义
 - KEY3 停止和 KEY4 清故障回调改为目标电压增减请求，原命令调用保留为注释
 - 板载调试串口由占用 ADC 管脚 PA2/PA3 的 USART1 迁移至 PA9/PA10 的 USART0，并将 `printf` 重定向到中断发送缓冲
 - Keil 工程启用 AC5 MicroLIB，与 EIDE 工程配置保持一致

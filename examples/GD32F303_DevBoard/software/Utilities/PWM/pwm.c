@@ -3,7 +3,7 @@
  * \brief 三相 120 度交错、六路逻辑互补 PWM 底层实现。
  *
  * TIMER3 作主定时器同步启动 TIMER2/TIMER1，三相使用 0/120/240 度
- * 计数初值。每相 CH0 为正向 PWM0，CH1 为共用 CCR 的逻辑互补 PWM1；
+ * 计数初值。每相 CH0 为先低后高的正向 PWM1，CH1 为共用 CCR 的逻辑互补 PWM0；
  * 普通定时器不产生硬件死区。CCR/ARR 通过影子寄存器更新，PWM_Stop()
  * 关闭三台定时器后将六路 GPIO 强制为低电平。
  */
@@ -71,10 +71,10 @@ static void PWM_ReloadSynchronizationState(void);
 static uint32_t PWM_TimerFromPhase(pwm_phase_t phase);
 
 /*!
-    \brief      将百分比占空比换算为定时器比较计数值
+    \brief      将正向高电平占空比换算为先低后高 PWM 的比较计数值
     \param[in]  duty_percent: 请求占空比，单位 %
     \param[out] 无
-    \return     直接截断量化后的 CCR 比较计数值
+    \return     高电平计数向下截断后对应的低电平结束计数值
 */
 static uint16_t PWM_CalculateCompareValue(float duty_percent);
 
@@ -216,7 +216,7 @@ void PWM_SetDutyCycle(pwm_phase_t phase, float duty_percent)
 
     timer_periph = PWM_TimerFromPhase(phase);
     compare_value = PWM_CalculateCompareValue(duty_percent);
-    current_duty[phase] = PWM_CalculateActualDuty(compare_value);
+    //current_duty[phase] = PWM_CalculateActualDuty(compare_value);
 
     /* 两次 CCR 写入期间禁止更新事件，避免溢出只装载其中一个通道。 */
     timer_update_event_disable(timer_periph);
@@ -324,11 +324,11 @@ static void PWM_Timer_Configure(uint32_t timer_periph, uint16_t compare_value)
     timer_channel_output_config(timer_periph, TIMER_CH_0, &timer_ocpara);
     timer_channel_output_config(timer_periph, TIMER_CH_1, &timer_ocpara);
 
-    /* CH0 使用 PWM0，CH1 使用 PWM1，在同一比较值下形成逻辑互补。 */
+    /* CH0 使用 PWM1 先低后高，CH1 使用 PWM0，在同一比较值下形成逻辑互补。 */
     timer_channel_output_mode_config(timer_periph, TIMER_CH_0,
-                                     TIMER_OC_MODE_PWM0);
-    timer_channel_output_mode_config(timer_periph, TIMER_CH_1,
                                      TIMER_OC_MODE_PWM1);
+    timer_channel_output_mode_config(timer_periph, TIMER_CH_1,
+                                     TIMER_OC_MODE_PWM0);
     timer_channel_output_shadow_config(timer_periph, TIMER_CH_0,
                                        TIMER_OC_SHADOW_ENABLE);
     timer_channel_output_shadow_config(timer_periph, TIMER_CH_1,
@@ -406,17 +406,18 @@ static uint32_t PWM_TimerFromPhase(pwm_phase_t phase)
 }
 
 /*!
-    \brief      将百分比占空比换算为定时器比较计数值
+    \brief      将正向高电平占空比换算为先低后高 PWM 的比较计数值
     \param[in]  duty_percent: 请求占空比，单位 %
     \param[out] 无
-    \return     直接截断量化后的 CCR 比较计数值
+    \return     高电平计数向下截断后对应的低电平结束计数值
 */
 static uint16_t PWM_CalculateCompareValue(float duty_percent)
 {
-    float compare_value; /*!< 百分比换算得到的浮点 CCR 计数值。 */
+    uint32_t high_counts; /*!< 请求占空比向下截断量化后的高电平计数数。 */
 
-    compare_value = (duty_percent * (float)PWM_PERIOD_COUNTS) / 100.0f;
-    return (uint16_t)compare_value;
+    high_counts = (uint32_t)((duty_percent * (float)PWM_PERIOD_COUNTS) /
+                             100.0f);
+    return (uint16_t)(PWM_PERIOD_COUNTS - high_counts);
 }
 
 /*!
@@ -427,5 +428,6 @@ static uint16_t PWM_CalculateCompareValue(float duty_percent)
 */
 static float PWM_CalculateActualDuty(uint16_t compare_value)
 {
-    return ((float)compare_value * 100.0f) / (float)PWM_PERIOD_COUNTS;
+    return ((float)(PWM_PERIOD_COUNTS - (uint32_t)compare_value) * 100.0f) /
+           (float)PWM_PERIOD_COUNTS;
 }

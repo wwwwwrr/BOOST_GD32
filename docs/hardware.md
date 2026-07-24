@@ -92,7 +92,7 @@ PWM 由三个普通定时器的 CH0/CH1 输出。TIMER3 为 A 相主定时器，
   ADCB   PA1       ADCx_IN1
   ADCC   PA2       ADCx_IN2
 
-三相电流由 ADC1 长度为 1 的规则序列采样。TIMER0 以 300 kHz 运行，并通过 CH0 比较事件触发 ADC1；每次转换完成都会产生 EOC 中断，中断保存当前相位 raw 后将 Rank0 软件切换到下一相，按 ADCA、ADCB、ADCC 轮转，因此每相更新率为 100 kHz。读取接口返回三相各自的最近值，不保证来自同一轮轮转。TIMER0 通过 ITI3 Event 从模式由 TIMER3 同步启动。
+三相电流由 ADC1 长度为 1 的规则序列采样。TIMER0 以 300 kHz 运行，并通过 CH0 比较事件触发 ADC1；每次转换完成都会产生 EOC 中断，中断保存当前相位 raw 后将 Rank0 软件切换到下一相。正常 PWM 同步运行时按 ADCB、ADCC、ADCA 轮转，三个触发点约位于 PWM 周期的 114°、234°、354°，对应当前先低后高 PWM 在各 120° 区间末尾的 B、C、A 相，因此每相更新率为 100 kHz。读取接口仍按 A、B、C 字段返回各相最近值，不保证来自同一轮轮转。TIMER0 通过 ITI3 Event 从模式由 TIMER3 同步启动。
 
 `BoostControl_Init()` 在正常 ADC 和 PWM 初始化前执行一次独立的 ADC1 零电流偏置校准。临时 ADC1 不配置 NVIC 或 EOC 中断，而是软件触发并轮询转换完成标志；按 ADCA、ADCB、ADCC 轮转丢弃前 8 轮后，对每相 64 个 raw 求平均。三相偏置提交到 L3 后立即关闭并反初始化 ADC1，随后由正常 `ADCMeasurement_Init/Start` 流程重新配置双 ADC。相电流按各相 `(raw - offset_raw)` 分别换算，不再共用固定 1.1 V 偏置；校准失败会锁存 ADC 相电流校准故障并禁止 PWM 启动。
 

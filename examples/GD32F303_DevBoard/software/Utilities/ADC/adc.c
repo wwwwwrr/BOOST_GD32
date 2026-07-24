@@ -32,6 +32,10 @@
 #define ADC1_PHASE_A_CHANNEL              ADC_CHANNEL_0
 #define ADC1_PHASE_B_CHANNEL              ADC_CHANNEL_1
 #define ADC1_PHASE_C_CHANNEL              ADC_CHANNEL_2
+#define ADC1_PHASE_A_INDEX                0U
+#define ADC1_PHASE_B_INDEX                1U
+#define ADC1_PHASE_C_INDEX                2U
+#define ADC1_RUNTIME_FIRST_PHASE          ADC1_PHASE_B_INDEX
 #define ADC1_SAMPLE_TIME                  ADC_SAMPLETIME_7POINT5
 #define ADC1_ALL_PHASES_MASK              0x07U
 
@@ -93,8 +97,8 @@ static const uint8_t adc1_phase_channels[ADC1_PHASE_CHANNEL_COUNT] = {
 };
 /* ADC1 A/B/C 各相最近一次转换结果，每次 EOC 中断只更新其中一项。 */
 static volatile uint16_t adc1_latest_raw[ADC1_PHASE_CHANNEL_COUNT];
-/* ADC1 当前 Rank0 对应的相位下标，依次为 A、B、C。 */
-static volatile uint8_t adc1_current_phase = 0U;
+/* ADC1 当前 Rank0 对应的语义相位下标，运行时按 B、C、A 轮转。 */
+static volatile uint8_t adc1_current_phase = ADC1_RUNTIME_FIRST_PHASE;
 /* ADC1 A/B/C 三相是否至少各完成过一次转换的位掩码。 */
 static volatile uint8_t adc1_fresh_phase_mask = 0U;
 /* ADC 底层初始化完成标志：1 表示已初始化，0 表示未初始化。 */
@@ -328,9 +332,9 @@ uint8_t ADC1_GetLatestRaw(adc1_phase_raw_t *result)
     // }
 
     __DMB();
-    result->phase_a_raw = adc1_latest_raw[0];
-    result->phase_b_raw = adc1_latest_raw[1];
-    result->phase_c_raw = adc1_latest_raw[2];
+    result->phase_a_raw = adc1_latest_raw[ADC1_PHASE_A_INDEX];
+    result->phase_b_raw = adc1_latest_raw[ADC1_PHASE_B_INDEX];
+    result->phase_c_raw = adc1_latest_raw[ADC1_PHASE_C_INDEX];
     return 1U;
 }
 
@@ -436,7 +440,7 @@ static void ADC_Peripheral_Config(void)
                               1U);
     adc_routine_channel_config(ADC1,
                                0U,
-                               adc1_phase_channels[0],
+                               adc1_phase_channels[ADC1_RUNTIME_FIRST_PHASE],
                                ADC1_SAMPLE_TIME);
     adc_discontinuous_mode_config(ADC1,
                                   ADC_CHANNEL_DISCON_DISABLE,
@@ -517,7 +521,7 @@ static void ADC_ResetRuntimeState(void)
 
     adc0_published_state = 0U;
 
-    adc1_current_phase = 0U;
+    adc1_current_phase = ADC1_RUNTIME_FIRST_PHASE;
     adc1_fresh_phase_mask = 0U;
     for (phase = 0U; phase < ADC1_PHASE_CHANNEL_COUNT; phase++) {
         adc1_latest_raw[phase] = 0U;
