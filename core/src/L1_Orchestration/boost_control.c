@@ -32,6 +32,8 @@ static void BoostControl_UpdatePowerLoop(void);
 static void BoostControl_ExecuteActiveOutput(void);
 static void BoostControl_ExecuteState(void);
 
+float adc_output_current_a = 0.0f;
+
 /*!
     \brief      初始化 Boost 控制系统并启动 10 kHz 控制定时器
     \param[in]  无
@@ -94,7 +96,9 @@ void BoostControl_Init(void)
     if (timer_initialized != 0U) {
         ControlTimer_Start();
     }
-		//DutyControl_Start();
+        // DutyControl_SetThreePhaseDuty(33.3f,33.3f, 33.3f);
+		// DutyControl_Start();
+		// DutyControl_SetThreePhaseDuty(33.3f,33.3f, 33.3f);
 }
 
 /*!
@@ -469,6 +473,7 @@ static void BoostControl_CheckProtection(void)
     if (boost_control.adc.output_current_a >
         BOOST_OUTPUT_OVERCURRENT_THRESHOLD_V) {
         boost_control.fault_flags |= BOOST_FAULT_OUTPUT_OVERCURRENT;
+        adc_output_current_a = boost_control.adc.output_current_a;
     }
     //去掉静态开路
     //BoostControl_CheckOpenLoad();

@@ -33,6 +33,11 @@
 #define BSP_ADC_PHASE_OFFSET_SAMPLE_ROUNDS    64U
 #define BSP_ADC_PHASE_OFFSET_TIMEOUT_MS       2U
 
+/* ADC1 运行时三相采样点，占一个 100 kHz PWM 周期的百分比。 */
+#define BSP_ADC1_PHASE_B_TRIGGER_PERCENT       28U
+#define BSP_ADC1_PHASE_C_TRIGGER_PERCENT       60U
+#define BSP_ADC1_PHASE_A_TRIGGER_PERCENT       94U
+
 /* Boost 快速控制环固定以 10 kHz（100 us）运行。 */
 #define BOOST_CONTROL_FREQUENCY_HZ             10000U
 
@@ -80,7 +85,7 @@
 
 /* 三相公共占空比及单个控制周期的最大允许变化量，单位均为百分比。 */
 #define BOOST_DUTY_MIN_PERCENT                 0.0f
-#define BOOST_DUTY_MAX_PERCENT                 90.0f
+#define BOOST_DUTY_MAX_PERCENT                 80.0f
 #define BOOST_DUTY_MAX_STEP_PERCENT            0.1f
 
 /*

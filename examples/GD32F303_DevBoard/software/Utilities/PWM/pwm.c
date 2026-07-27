@@ -108,7 +108,8 @@ void PWM_Init(void)
     rcu_periph_clock_enable(PWM_PHASE_A_TIMER_RCU);
     rcu_periph_clock_enable(PWM_PHASE_B_TIMER_RCU);
     rcu_periph_clock_enable(PWM_PHASE_C_TIMER_RCU);
-    
+
+    gpio_pin_remap_config(GPIO_SWJ_SWDPENABLE_REMAP, ENABLE);
     PWM_GPIO_ConfigureSafeLow();
     PWM_GPIO_ConfigureAlternateFunction();
 
@@ -283,7 +284,7 @@ static void PWM_GPIO_ConfigureAlternateFunction(void)
 {
     /* 释放 PA15/PB3/PB4 的 JTAG 功能，同时保留 PA13/PA14 的 SWD。 */
     //这个debug时必须注释
-    gpio_pin_remap_config(GPIO_SWJ_SWDPENABLE_REMAP, ENABLE);
+//    gpio_pin_remap_config(GPIO_SWJ_SWDPENABLE_REMAP, ENABLE);
     gpio_pin_remap_config(GPIO_TIMER1_FULL_REMAP, ENABLE);
     gpio_pin_remap_config(GPIO_TIMER2_PARTIAL_REMAP, ENABLE);
 

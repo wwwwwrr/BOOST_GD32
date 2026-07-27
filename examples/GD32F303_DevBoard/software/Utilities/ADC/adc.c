@@ -54,12 +54,19 @@
 #define ADC_TRIGGER_TIMER                 TIMER0
 #define ADC_TRIGGER_TIMER_RCU             RCU_TIMER0
 #define ADC_TRIGGER_TIMER_CLOCK_HZ        120000000U
-#define ADC_TRIGGER_FREQUENCY_HZ          300000U
+#define ADC_TRIGGER_FREQUENCY_HZ          100000U
 #define ADC_TRIGGER_TIMER_PRESCALER       0U
 #define ADC_TRIGGER_PERIOD_COUNTS         (ADC_TRIGGER_TIMER_CLOCK_HZ / \
                                            ADC_TRIGGER_FREQUENCY_HZ)
 #define ADC_TRIGGER_TIMER_PERIOD          (ADC_TRIGGER_PERIOD_COUNTS - 1U)
-#define ADC_TRIGGER_COMPARE_VALUE         380U
+#define ADC_TRIGGER_COMPARE_FROM_PERCENT(percent) \
+    ((ADC_TRIGGER_PERIOD_COUNTS * (percent)) / 100U)
+#define ADC1_PHASE_B_COMPARE_VALUE \
+    ADC_TRIGGER_COMPARE_FROM_PERCENT(BSP_ADC1_PHASE_B_TRIGGER_PERCENT)
+#define ADC1_PHASE_C_COMPARE_VALUE \
+    ADC_TRIGGER_COMPARE_FROM_PERCENT(BSP_ADC1_PHASE_C_TRIGGER_PERCENT)
+#define ADC1_PHASE_A_COMPARE_VALUE \
+    ADC_TRIGGER_COMPARE_FROM_PERCENT(BSP_ADC1_PHASE_A_TRIGGER_PERCENT)
 
 #if ((ADC0_DMA_FRAME_COUNT % 2U) != 0U)
 #error "ADC0 DMA frame count must be even"
@@ -75,6 +82,22 @@
 
 #if (ADC_TRIGGER_PERIOD_COUNTS > 65536U)
 #error "TIMER0 period does not fit the 16-bit counter"
+#endif
+
+#if ((BSP_ADC1_PHASE_B_TRIGGER_PERCENT == 0U) || \
+     (BSP_ADC1_PHASE_A_TRIGGER_PERCENT >= 100U))
+#error "ADC1 trigger percentages must be between 1 and 99"
+#endif
+
+#if !((BSP_ADC1_PHASE_B_TRIGGER_PERCENT < \
+       BSP_ADC1_PHASE_C_TRIGGER_PERCENT) && \
+      (BSP_ADC1_PHASE_C_TRIGGER_PERCENT < \
+       BSP_ADC1_PHASE_A_TRIGGER_PERCENT))
+#error "ADC1 trigger percentages must be ordered B < C < A"
+#endif
+
+#if (ADC1_PHASE_A_COMPARE_VALUE > ADC_TRIGGER_TIMER_PERIOD)
+#error "ADC1 phase-A compare value exceeds the TIMER0 period"
 #endif
 
 /* ADC0 DMA 直接写入的两帧三通道循环缓冲，通道顺序为 PA3、PA4、PA5。 */
@@ -95,10 +118,19 @@ static const uint8_t adc1_phase_channels[ADC1_PHASE_CHANNEL_COUNT] = {
     ADC1_PHASE_B_CHANNEL,
     ADC1_PHASE_C_CHANNEL
 };
+/* ADC1 A/B/C 采样点对应的 TIMER0_CH0 比较计数值。 */
+static const uint16_t
+    adc1_phase_compare_values[ADC1_PHASE_CHANNEL_COUNT] = {
+        ADC1_PHASE_A_COMPARE_VALUE,
+        ADC1_PHASE_B_COMPARE_VALUE,
+        ADC1_PHASE_C_COMPARE_VALUE
+    };
 /* ADC1 A/B/C 各相最近一次转换结果，每次 EOC 中断只更新其中一项。 */
 static volatile uint16_t adc1_latest_raw[ADC1_PHASE_CHANNEL_COUNT];
 /* ADC1 当前 Rank0 对应的语义相位下标，运行时按 B、C、A 轮转。 */
 static volatile uint8_t adc1_current_phase = ADC1_RUNTIME_FIRST_PHASE;
+/* CCR 错过更新点后，下一次旧采样点转换只清 EOC、不发布结果。 */
+static volatile uint8_t adc1_discard_next_conversion = 0U;
 /* ADC1 A/B/C 三相是否至少各完成过一次转换的位掩码。 */
 static volatile uint8_t adc1_fresh_phase_mask = 0U;
 /* ADC 底层初始化完成标志：1 表示已初始化，0 表示未初始化。 */
@@ -110,7 +142,9 @@ static void ADC_GPIO_Config(void);
 static void ADC_DMA_Config(void);
 static void ADC_Peripheral_Config(void);
 static void ADC_TriggerTimer_Config(void);
+static void ADC_TriggerTimer_Reset(void);
 static void ADC_ResetRuntimeState(void);
+static void ADC1_RuntimePhaseSelect(uint8_t phase);
 static void ADC_EnableAndCalibrate(void);
 static void ADC0_CopyCompletedFrame(uint32_t source_frame_offset);
 static uint8_t ADC1_OffsetCalibration_Init(void);
@@ -158,8 +192,7 @@ void ADC_Start(void)
         return;
     }
 
-    timer_disable(ADC_TRIGGER_TIMER);
-    timer_counter_value_config(ADC_TRIGGER_TIMER, 0U);
+    ADC_TriggerTimer_Reset();
 
     dma_channel_disable(ADC0_DMA_PERIPH, ADC0_DMA_CHANNEL);
     dma_memory_address_config(ADC0_DMA_PERIPH,
@@ -173,10 +206,6 @@ void ADC_Start(void)
                              DMA_INT_FLAG_G);
 
     ADC_ResetRuntimeState();
-    adc_routine_channel_config(ADC1,
-                               0U,
-                               adc1_phase_channels[adc1_current_phase],
-                               ADC1_SAMPLE_TIME);
     ADC_EnableAndCalibrate();
 
     adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOC);
@@ -438,9 +467,21 @@ static void ADC_Peripheral_Config(void)
     adc_channel_length_config(ADC1,
                               ADC_ROUTINE_CHANNEL,
                               1U);
+    /*
+     * 运行时只改 Rank0，因此在初始化阶段先为 A/B/C 都配置好采样时间，
+     * 最后恢复首次运行相位 B。
+     */
     adc_routine_channel_config(ADC1,
                                0U,
-                               adc1_phase_channels[ADC1_RUNTIME_FIRST_PHASE],
+                               ADC1_PHASE_A_CHANNEL,
+                               ADC1_SAMPLE_TIME);
+    adc_routine_channel_config(ADC1,
+                               0U,
+                               ADC1_PHASE_C_CHANNEL,
+                               ADC1_SAMPLE_TIME);
+    adc_routine_channel_config(ADC1,
+                               0U,
+                               ADC1_PHASE_B_CHANNEL,
                                ADC1_SAMPLE_TIME);
     adc_discontinuous_mode_config(ADC1,
                                   ADC_CHANNEL_DISCON_DISABLE,
@@ -453,7 +494,7 @@ static void ADC_Peripheral_Config(void)
 }
 
 /*!
-    \brief      配置 TIMER0 为 ADC1 的 300 kHz 硬件触发从定时器
+    \brief      配置 TIMER0 为 ADC1 的 100 kHz 硬件触发从定时器
     \param[in]  无
     \param[out] 无
     \retval     无
@@ -492,10 +533,10 @@ static void ADC_TriggerTimer_Config(void)
                                      TIMER_OC_MODE_PWM1);
     timer_channel_output_shadow_config(ADC_TRIGGER_TIMER,
                                        TIMER_CH_0,
-                                       TIMER_OC_SHADOW_DISABLE);
+                                       TIMER_OC_SHADOW_ENABLE);
     timer_channel_output_pulse_value_config(ADC_TRIGGER_TIMER,
                                             TIMER_CH_0,
-                                            ADC_TRIGGER_COMPARE_VALUE);
+                                            ADC1_PHASE_B_COMPARE_VALUE);
 
     timer_auto_reload_shadow_enable(ADC_TRIGGER_TIMER);
     //必须开启输出模式
@@ -510,6 +551,22 @@ static void ADC_TriggerTimer_Config(void)
 }
 
 /*!
+    \brief      复位 TIMER0 的首个 B 相采样点及计数器
+    \param[in]  无
+    \param[out] 无
+    \retval     无
+*/
+static void ADC_TriggerTimer_Reset(void)
+{
+    timer_disable(ADC_TRIGGER_TIMER);
+    timer_channel_output_pulse_value_config(ADC_TRIGGER_TIMER,
+                                            TIMER_CH_0,
+                                            ADC1_PHASE_B_COMPARE_VALUE);
+    timer_event_software_generate(ADC_TRIGGER_TIMER, TIMER_EVENT_SRC_UPG);
+    timer_counter_value_config(ADC_TRIGGER_TIMER, 0U);
+}
+
+/*!
     \brief      清除 ADC0 和 ADC1 的底层快照发布状态
     \param[in]  无
     \param[out] 无
@@ -521,11 +578,29 @@ static void ADC_ResetRuntimeState(void)
 
     adc0_published_state = 0U;
 
-    adc1_current_phase = ADC1_RUNTIME_FIRST_PHASE;
+    ADC1_RuntimePhaseSelect(ADC1_RUNTIME_FIRST_PHASE);
+    adc1_discard_next_conversion = 0U;
     adc1_fresh_phase_mask = 0U;
     for (phase = 0U; phase < ADC1_PHASE_CHANNEL_COUNT; phase++) {
         adc1_latest_raw[phase] = 0U;
     }
+}
+
+/*!
+    \brief      仅切换 ADC1 Rank0 通道，采样时间已在初始化阶段配置
+    \param[in]  phase: ADC1_PHASE_x_INDEX
+    \param[out] 无
+    \retval     无
+*/
+static void ADC1_RuntimePhaseSelect(uint8_t phase)
+{
+    uint32_t routine_sequence;             /*!< ADC1 规则序列 Rank0 配置 */
+
+    routine_sequence = ADC_RSQ2(ADC1);
+    routine_sequence &= ~((uint32_t)ADC_RSQX_RSQN);
+    routine_sequence |= (uint32_t)adc1_phase_channels[phase];
+    ADC_RSQ2(ADC1) = routine_sequence;
+    adc1_current_phase = phase;
 }
 
 /*!
@@ -706,9 +781,9 @@ void ADC_DMA_IRQHandler_Internal(void)
     if (dma_interrupt_flag_get(ADC0_DMA_PERIPH,
                                ADC0_DMA_CHANNEL,
                                DMA_INT_FLAG_ERR) != RESET) {
-        dma_interrupt_flag_clear(ADC0_DMA_PERIPH,
-                                 ADC0_DMA_CHANNEL,
-                                 DMA_INT_FLAG_ERR);
+//        dma_interrupt_flag_clear(ADC0_DMA_PERIPH,
+//                                 ADC0_DMA_CHANNEL,
+//                                 DMA_INT_FLAG_ERR);
     }
 
     half_transfer_flag = dma_interrupt_flag_get(ADC0_DMA_PERIPH,
@@ -746,6 +821,8 @@ void ADC_DMA_IRQHandler_Internal(void)
 void ADC1_IRQHandler_Internal(void)
 {
     uint16_t conversion_value;             /*!< 当前 EOC 对应的 ADC1 转换结果 */
+    uint16_t completed_compare;             /*!< 当前相位使用的 TIMER0 比较值 */
+    uint16_t trigger_counter;               /*!< 读取结果时的 TIMER0 计数值 */
     uint8_t completed_phase;               /*!< 当前结果对应的相位下标 */
     uint8_t next_phase;                    /*!< 下一次触发需要转换的相位下标 */
 
@@ -754,21 +831,37 @@ void ADC1_IRQHandler_Internal(void)
     }
 
     conversion_value = adc_routine_data_read(ADC1);
+    trigger_counter = (uint16_t)timer_counter_read(ADC_TRIGGER_TIMER);
     adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOC);
 
-    completed_phase = adc1_current_phase;
-    adc1_latest_raw[completed_phase] = conversion_value;
-    __DMB();
-    adc1_fresh_phase_mask |= (uint8_t)(1U << completed_phase);
+    /*
+     * A@96% 转换完成时 TIMER0 已越过更新点；旧的 96% CCR 会再触发一次。
+     * 此次结果只用于清除 EOC，下一相通道和 CCR 已在上次有效中断中准备好。
+     */
+    if (adc1_discard_next_conversion != 0U) {
+        adc1_discard_next_conversion = 0U;
+        return;
+    }
 
+    completed_phase = adc1_current_phase;
+    completed_compare = adc1_phase_compare_values[completed_phase];
     next_phase = (uint8_t)(completed_phase + 1U);
     if (next_phase >= ADC1_PHASE_CHANNEL_COUNT) {
         next_phase = 0U;
     }
 
-    adc_routine_channel_config(ADC1,
-                               0U,
-                               adc1_phase_channels[next_phase],
-                               ADC1_SAMPLE_TIME);
-    adc1_current_phase = next_phase;
+    /*
+     * 先完成下一相的通道和影子 CCR 配置，再发布本次结果。
+     * 若计数器已经回绕，说明本次写入错过更新点，下一次转换必须丢弃。
+     */
+    ADC1_RuntimePhaseSelect(next_phase);
+    TIMER_CH0CV(ADC_TRIGGER_TIMER) =
+        (uint32_t)adc1_phase_compare_values[next_phase];
+    if (trigger_counter < completed_compare) {
+        adc1_discard_next_conversion = 1U;
+    }
+
+    adc1_latest_raw[completed_phase] = conversion_value;
+    __DMB();
+    adc1_fresh_phase_mask |= (uint8_t)(1U << completed_phase);
 }

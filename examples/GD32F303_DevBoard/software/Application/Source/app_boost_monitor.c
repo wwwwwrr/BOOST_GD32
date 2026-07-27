@@ -20,6 +20,9 @@ static void AppBoostMonitor_RxCallback(const uint8_t *data, uint16_t length);
 static void AppBoostMonitor_PrintPhaseOffsets(void);
 static void AppBoostMonitor_Print(const boost_control_context_t *context);
 
+
+extern float adc_output_current_a;
+
 /*!
     \brief      初始化 USART0 与 Boost 状态监视、命令接收任务
     \param[in]  无
@@ -198,4 +201,6 @@ static void AppBoostMonitor_Print(const boost_control_context_t *context)
         context->duty_phase_a_percent,
         context->duty_phase_b_percent,
         context->duty_phase_c_percent);
+
+        //printf("adc_output_current_a=%.3fA\r\n", adc_output_current_a);
 }
