@@ -25,7 +25,7 @@
 /* Iout = Vadc_iout / (BSP_ADC_IOUT_AMP_GAIN * BSP_ADC_IOUT_RSENSE) = Vadc_iout * 3.9. */
 #define BSP_ADC_IOUT_GAIN          (1.0f / (BSP_ADC_IOUT_AMP_GAIN * BSP_ADC_IOUT_RSENSE))
 
-/* Iphase = delta-V / (25.64 * Rsense) = delta-V * 3.9. */
+/* Iphase = delta-V / (25.64 * Rsense) = delta-V * 7.8. */
 #define BSP_ADC_PHASE_GAIN         (1.0f / (BSP_ADC_IOUT_AMP_GAIN * BSP_ADC_CURRENT_RSENSE))
 
 /* ADC1 上电偏置校准：先丢弃8轮，再对每相64个样本求平均。 */
@@ -34,7 +34,7 @@
 #define BSP_ADC_PHASE_OFFSET_TIMEOUT_MS       2U
 
 /* ADC1 运行时三相采样点，占一个 100 kHz PWM 周期的百分比。 */
-#define BSP_ADC1_PHASE_B_TRIGGER_PERCENT       28U
+#define BSP_ADC1_PHASE_B_TRIGGER_PERCENT       29U
 #define BSP_ADC1_PHASE_C_TRIGGER_PERCENT       60U
 #define BSP_ADC1_PHASE_A_TRIGGER_PERCENT       94U
 
@@ -46,11 +46,11 @@
 
 /* Boost 恒压、恒流与首版输出过压保护目标。 */
 #define BOOST_OUTPUT_VOLTAGE_SETPOINT_V        30.0f
-#define BOOST_OUTPUT_CURRENT_SETPOINT_A        1.0f
+#define BOOST_OUTPUT_CURRENT_SETPOINT_A        1.5f
 #define BOOST_OUTPUT_OVERVOLTAGE_THRESHOLD_V   70.0f
 #define BOOST_OUTPUT_OVERCURRENT_THRESHOLD_V   3.0f
 //电压调节
-#define BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V      10.0f
+#define BOOST_OUTPUT_VOLTAGE_ADJUST_STEP_V      5.0f
 #define BOOST_OUTPUT_VOLTAGE_SETPOINT_MIN_V     12.0f
 #define BOOST_OUTPUT_VOLTAGE_SETPOINT_MAX_V     65.0f
    
@@ -83,6 +83,9 @@
 #define BOOST_SOFT_START_INITIAL_VOLTAGE_V     12.0f
 #define BOOST_SOFT_START_STEP_V                0.002f
 
+/* 三相共用的正向相电流限制；超限相只禁止占空比继续增加。 */
+#define BOOST_PHASE_CURRENT_LIMIT_A            3.0f
+
 /* 三相公共占空比及单个控制周期的最大允许变化量，单位均为百分比。 */
 #define BOOST_DUTY_MIN_PERCENT                 0.0f
 #define BOOST_DUTY_MAX_PERCENT                 80.0f
@@ -93,8 +96,8 @@
  * Ki 直接表示每个 10 kHz 控制周期的系数，不再换算为每秒值。
  * 当前 Kd 为 0，结构体中仅保留该参数供后续扩展。
  */
-#define BOOST_VOLTAGE_PI_KP                    0.6f
-#define BOOST_VOLTAGE_PI_KI_PER_CYCLE          0.05f
+#define BOOST_VOLTAGE_PI_KP                    0.5f
+#define BOOST_VOLTAGE_PI_KI_PER_CYCLE          0.6f
 #define BOOST_VOLTAGE_PI_KD                    0.0f
 #define BOOST_CURRENT_PI_KP                    2.5f
 #define BOOST_CURRENT_PI_KI_PER_CYCLE          0.8f

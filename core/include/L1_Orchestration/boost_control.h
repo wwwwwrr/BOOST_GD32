@@ -47,10 +47,10 @@ typedef struct {
     float voltage_reference_v;    /*!< 控制环当前使用的电压目标，单位 V。 */
     float duty_voltage_percent;   /*!< 电压环占空比输出，单位 %。 */
     float duty_current_percent;   /*!< 电流环占空比输出，单位 %。 */
-    float duty_total_percent;     /*!< 双环取小后的公共占空比，单位 %。 */
-    float duty_phase_a_percent;   /*!< A 相占空比，单位 %。 */
-    float duty_phase_b_percent;   /*!< B 相占空比，单位 %。 */
-    float duty_phase_c_percent;   /*!< C 相占空比，单位 %。 */
+    float duty_total_percent;     /*!< 双环取小后的三相公共目标占空比，单位 %。 */
+    float duty_phase_a_percent;   /*!< 相电流限制后的 A 相占空比请求，单位 %。 */
+    float duty_phase_b_percent;   /*!< 相电流限制后的 B 相占空比请求，单位 %。 */
+    float duty_phase_c_percent;   /*!< 相电流限制后的 C 相占空比请求，单位 %。 */
     uint8_t pwm_running;          /*!< PWM 运行标志：1 已启动，0 已停止。 */
 } boost_control_context_t;
 

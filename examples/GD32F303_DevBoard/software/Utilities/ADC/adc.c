@@ -336,7 +336,7 @@ uint8_t ADC0_GetLatestRaw(adc0_frame_raw_t *result, uint32_t *sequence)
             adc0_snapshot_buffer[snapshot_index].output_voltage_raw;
         result->input_voltage_raw =
             adc0_snapshot_buffer[snapshot_index].input_voltage_raw;
-        __DMB();
+       
 
    
 
@@ -747,6 +747,7 @@ static uint8_t ADC1_OffsetCalibration_Read(uint8_t channel,
     \param[out] 无
     \retval     无
 */
+// uint16_t b = 0;
 static void ADC0_CopyCompletedFrame(uint32_t source_frame_offset)
 {
     uint32_t current_state;                /*!< 复制前的 ADC0 快照发布状态 */
@@ -761,6 +762,12 @@ static void ADC0_CopyCompletedFrame(uint32_t source_frame_offset)
         adc0_dma_buffer[source_frame_offset][1];
     adc0_snapshot_buffer[destination_snapshot].input_voltage_raw =
         adc0_dma_buffer[source_frame_offset][2];
+        //测试
+        // if (adc0_snapshot_buffer[destination_snapshot].output_current_raw >
+        //     4096U) {
+        //         b = adc0_snapshot_buffer[destination_snapshot].output_current_raw;
+        //     }
+    
 
     __DMB();
     next_sequence = (current_state >> 1U) + 1U;
@@ -781,9 +788,9 @@ void ADC_DMA_IRQHandler_Internal(void)
     if (dma_interrupt_flag_get(ADC0_DMA_PERIPH,
                                ADC0_DMA_CHANNEL,
                                DMA_INT_FLAG_ERR) != RESET) {
-//        dma_interrupt_flag_clear(ADC0_DMA_PERIPH,
-//                                 ADC0_DMA_CHANNEL,
-//                                 DMA_INT_FLAG_ERR);
+        dma_interrupt_flag_clear(ADC0_DMA_PERIPH,
+                                 ADC0_DMA_CHANNEL,
+                                 DMA_INT_FLAG_ERR);
     }
 
     half_transfer_flag = dma_interrupt_flag_get(ADC0_DMA_PERIPH,

@@ -79,14 +79,6 @@ static uint32_t PWM_TimerFromPhase(pwm_phase_t phase);
 static uint16_t PWM_CalculateCompareValue(float duty_percent);
 
 /*!
-    \brief      将比较计数值换算为实际量化占空比
-    \param[in]  compare_value: CCR 比较计数值
-    \param[out] 无
-    \return     实际量化占空比，单位 %
-*/
-static float PWM_CalculateActualDuty(uint16_t compare_value);
-
-/*!
     \brief      初始化固定 100 kHz 三相 PWM 硬件
     \param[in]  无
     \param[out] 无
@@ -217,7 +209,6 @@ void PWM_SetDutyCycle(pwm_phase_t phase, float duty_percent)
 
     timer_periph = PWM_TimerFromPhase(phase);
     compare_value = PWM_CalculateCompareValue(duty_percent);
-    //current_duty[phase] = PWM_CalculateActualDuty(compare_value);
 
     /* 两次 CCR 写入期间禁止更新事件，避免溢出只装载其中一个通道。 */
     timer_update_event_disable(timer_periph);
@@ -419,16 +410,4 @@ static uint16_t PWM_CalculateCompareValue(float duty_percent)
     high_counts = (uint32_t)((duty_percent * (float)PWM_PERIOD_COUNTS) /
                              100.0f);
     return (uint16_t)(PWM_PERIOD_COUNTS - high_counts);
-}
-
-/*!
-    \brief      将比较计数值换算为实际量化占空比
-    \param[in]  compare_value: CCR 比较计数值
-    \param[out] 无
-    \return     实际量化占空比，单位 %
-*/
-static float PWM_CalculateActualDuty(uint16_t compare_value)
-{
-    return ((float)(PWM_PERIOD_COUNTS - (uint32_t)compare_value) * 100.0f) /
-           (float)PWM_PERIOD_COUNTS;
 }

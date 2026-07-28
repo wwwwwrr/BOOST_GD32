@@ -14,15 +14,15 @@
 #define NVIC_PRIORITY_GROUPING NVIC_PRIGROUP_PRE4_SUB0
 
 /* TIMER4 运行 10 kHz Boost 控制任务，仅允许 ADC1 EOC 中断抢占。 */
-#define TIMER4_PRIORITY_GROUP      1
+#define TIMER4_PRIORITY_GROUP      2
 #define TIMER4_PRIORITY_SUBGROUP   0
 
 /* ADC1 EOC must complete before the next 300 kHz TIMER0 trigger. */
-#define ADC0_1_PRIORITY_GROUP      0
+#define ADC0_1_PRIORITY_GROUP      1
 #define ADC0_1_PRIORITY_SUBGROUP   0
 
 /* ADC0 DMA only copies a completed 32-frame half-buffer. */
-#define ADC0_DMA_PRIORITY_GROUP    2
+#define ADC0_DMA_PRIORITY_GROUP    0
 #define ADC0_DMA_PRIORITY_SUBGROUP 0
 
 /* USART interrupt priorities */
