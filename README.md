@@ -28,3 +28,8 @@
 ├── docs/                          ← 架构/开发/硬件文档
 ├── dev-guidelines/                ← 开发规则
 └── CHANGELOG.md                   ← 版本历史
+
+```
+
+硬件效果图：
+![alt text](硬件.jpg)
